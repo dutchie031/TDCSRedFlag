@@ -9,6 +9,7 @@
 local CallsignDelimiter = "|"
 
 --Sets all units invulnerable
+--Will set all units/groups to invulnerable after takeoff.
 local SetAutoInvulnerable = true
 
 -- If AI are hit they will be set to: 
@@ -16,6 +17,13 @@ local SetAutoInvulnerable = true
 -- NonAggressive
 -- RTB (If last waypoint in route is "Land" it will land there)
 local PlayersOnly = false
+
+-- Amount of bullets to have hit before a kill event
+local BulletHitsForKill = 8
+
+-- Amount of Missiles to have hit before a kill counts
+local MissileHitsForKill = 1
+
 
 -- Message shown to the target
 local KilledMessage = "You are dead, flow out of the action"
@@ -42,30 +50,53 @@ do
     end
 end
 
+Log.info("Initiating ...")
+
 local UnitManager = {}
 do
     local dead_units = {}
 
+    local bullethits = {}
+
+    
+    ---Checks if unit is alive according to the simulation
+    ---@param unitId integer
+    ---@return boolean
     UnitManager.isUnitAlive = function(unitId)
         local id = tostring(unitId)
-
-        if dead_units[id] == nil or dead_units[id] == false then
+        if dead_units[id] == true then
             return true
         end
+        return true
+    end
 
-        
+    ---Registers a hit
+    ---@param unitId integer
+    ---@param weapon table
+    UnitManager.registerHit = function(unitId, weapon)
+
+    end
+
+    UnitManager.markUnitDead = function(unitId)
 
     end
 
 end
 
 local Helpers = {}
-do 
+do
+    Helpers.SetInvulnerable = function(groupName)
+        SetImmortal = { 
+            id = 'SetImmortal',
+            params = {
+                value = true 
+            }
+        }
 
-    
-    local SetInvulnerable = function(groupName)
-
-    
+        local group = Group.getByName(groupName)
+        if group then
+            group:getController():setCommand(SetImmortal)
+        end
     end
 
 end
@@ -84,3 +115,5 @@ local EventHandler = {}
 do
     
 end
+
+Log.info("Started")
