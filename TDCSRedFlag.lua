@@ -78,7 +78,7 @@ do
     end
 
     UnitManager.markUnitDead = function(unitId)
-
+        
     end
 
 end
