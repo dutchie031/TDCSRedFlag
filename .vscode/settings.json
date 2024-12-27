@@ -1,6 +1,13 @@
 {
     "Lua.diagnostics.globals": [
         "env",
-        "Group"
+        "Group",
+        "coalition",
+        "timer",
+        "net",
+        "Unit",
+        "world",
+        "Weapon",
+        "trigger"
     ]
 }
