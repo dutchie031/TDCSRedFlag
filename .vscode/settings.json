@@ -8,6 +8,8 @@
         "Unit",
         "world",
         "Weapon",
-        "trigger"
-    ]
+        "trigger",
+        "Object"
+    ],
+    "todo-tree.tree.scanMode": "current file"
 }

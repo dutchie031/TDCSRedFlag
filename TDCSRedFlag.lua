@@ -1,4 +1,36 @@
+--=========================================
 
+-- BIG NOTE!!!
+-- This script only works in DCS when it's being run a Dedicated Server.
+-- This is due to a player slot or a client slot that has the same userID (when run from the game itself) the unit commands on the host don't work.
+
+
+--[[
+
+TDCS Red Flag is meant to create an environment where players can practice and fly without having to respawn like one would in a RED Flag event. 
+
+Currently Implemented: 
+
+- Killed calls
+- Hit calls (delayed)
+- PK Miss for missiles
+- Gun kills (after X rounds)
+- Missile kills
+
+- AI RTB after being killed
+
+- When dead all weapons will be deleted after being fired.
+
+- Invisible after being shot. (No AI will shoot you)
+- Auto immortal
+
+- Respawn:
+ - zones
+ - AAR
+ - Landing
+]]--
+
+--=========================================
 
 
 --============================================
@@ -10,42 +42,77 @@ local Config = {
     -- Delimiter of callsign. Messages to GCI will show as: "Hacker 1-1" as opposed to "Hacker 1-1 | Dutchie"
     CallSignDelimiter = "|",
 
-    -- Sets all units invulnerable
-    -- Will set all units/groups to invulnerable after takeoff.
-    SetAutoInvulnerable = true,
-
-    -- If AI are hit they will be set to: 
+    -- If AI are hit they will be set to:
     -- NonEvasive
     -- NonAggressive
     -- RTB (If last waypoint in route is "Land" it will land there)
     PlayersOnly = false,
     
-    -- Revives are not Implemented Yet
-    Revive = {
-        -- Revive player after taking first fuel from a tanker
-        TankerConnect = false
-    },
     -- Delays are in seconds
     Delays = {
         MissDelay = 6,
-
+        MissileKillDelay = 3,    -- Message TO the shooter, to the target any hits are always instant
+        GunKillDelay = 0,        -- Message TO the shooter, to the target any hits are always instant
+        MissMessageOnScreen = 5, -- Message TO the shooter
         DeathMessageOnScreenSeconds = 180
     },
     Messages = {
-        KilledMessage = "You are dead, flow away from the action",
+        --- replaceable variables:
+        --- {{ callsign }} => replaces with the callsign (delimited first part)
+
+        KilledMessage = "{{ callsign }}, You are dead, flow away from the action",
         MissMessage = "PK Miss",
+        HitMessage = "PK Hit",
         CopyShotMessage = "Copy Shot"
     },
     -- Amount of registered hits before "death"
     KillParameters = {
         Bullets = 8,
         Missiles = 1
-    }
+    },
+    -- REVIVE NOT IMPLEMENTED
+    Revive = {
+        -- Revive player after taking first fuel from a tanker
+        TankerConnect = true,
+
+        --After landing, if an aircraft is still on the ground 30 seconds after landing. (No Touch and goes)
+        Landing = true,
+        
+        -- Respawn zones need to start with "REVIVE_" so "REVIVE_<zoneName>"
+        InRespawnZone = true,
+    },
+    AutoInvulnerableSettings = {
+        -- Automatically manages invulnerablity. 
+        Enabled = true,
+
+        -- Players only
+        PlayersOnly = false,
+
+        -- Invulnerable when outside trigger zones starting with name "vulnerablezone_"
+        OutsideVulnerableZone = true,
+
+        -- NOT IMPLEMENTED YET!!
+        -- Invulnerable when inside trigger zones starting with name "invulnerablezone_"
+        -- (Doesn't really do anything if OutsideVulnerableZone is set to true as well)
+        InsideInvulnerablezone = true,
+        
+        -- Detects whether or not a unit has hit the ground or scenery object when invulnerable. 
+        -- If a unit indeed hit the ground in an "excessive way" it will explode 
+        GroundCollisionDetection = true,
+        ObjectCollisionDetection = true
+    },
+    DebugLog = true
 }
 
 --============================================
 -- Script starts here
 --============================================
+
+
+local isSinglePlayer = false
+if net.get_my_player_id() == 0 then
+    isSinglePlayer = true
+end
 
 local Util = {}
 do
@@ -64,7 +131,6 @@ do
         end
         return result
     end
-
 end
 
 local Log = {}
@@ -80,29 +146,86 @@ do
     Log.error = function(string)
         env.error("[TDCS Red Flag] " .. (string or "nil"))
     end
+
+    Log.debug = function(string)
+        if Config.DebugLog == false then
+            return false
+        end
+        env.info("[DEBUG][TDCS Red Flag] " .. (string or "nil"))
+    end
 end
 
 local Helpers = {}
 do
-    Helpers.setInvulnerable = function(groupName)
-        SetImmortal = { 
-            id = 'SetImmortal',
-            params = {
-                value = true 
-            }
-        }
-
-        local group = Group.getByName(groupName)
-        if group then
-            group:getController():setCommand(SetImmortal)
+    local function table_print(tt, indent, done)
+        done = done or {}
+        indent = indent or 0
+        if type(tt) == "table" then
+            local sb = {}
+            for key, value in pairs(tt) do
+                table.insert(sb, string.rep(" ", indent)) -- indent it
+                if type(value) == "table" and not done[value] then
+                    done[value] = true
+                    table.insert(sb, key .. " = {\n");
+                    table.insert(sb, table_print(value, indent + 2, done))
+                    table.insert(sb, string.rep(" ", indent)) -- indent it
+                    table.insert(sb, "}\n");
+                elseif "number" == type(key) then
+                    table.insert(sb, string.format("\"%s\"\n", tostring(value)))
+                else
+                    table.insert(sb, string.format(
+                        "%s = \"%s\"\n", tostring(key), tostring(value)))
+                end
+            end
+            return table.concat(sb)
+        else
+            return tt .. "\n"
         end
     end
 
-    
+    Helpers.toString = function(something)
+        if something == nil then
+            return "nil"
+        elseif "table" == type(something) then
+            return table_print(something)
+        elseif "string" == type(something) then
+            return something
+        else
+            return tostring(something)
+        end
+    end
+
+    Helpers.vecToMs = function(vec)
+        return (vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2) ^ 0.5
+    end
+
+    Helpers.vecSub = function(vec1, vec2)
+        return { x = vec1.x - vec2.x, y = vec1.y - vec2.y, z = vec1.z - vec2.z }
+    end
+
+    Helpers.normVec = function(vec)
+        local magnitude = Helpers.vecToMs(vec)
+
+        return {
+            x = vec.x / magnitude,
+            y = vec.y / magnitude,
+            z = vec.z / magnitude
+        }
+    end
+
+    ---returns a number in range [-1,1]. > 0 same direction. < 0 opposite direction
+    ---@param vec1 any
+    ---@param vec2 any
+    ---@return number
+    Helpers.vecAlignment = function(vec1, vec2)
+        local vec1Norm = Helpers.normVec(vec1)
+        local vec2Norm = Helpers.normVec(vec2)
+
+        return ((vec1Norm.x * vec2Norm.x) + (vec1Norm.y * vec2Norm.y) + (vec1Norm.z * vec2Norm.z))
+    end
+
     Helpers.isPlayer = function(unitId, coalitionId)
-
         if coalitionId == nil then
-
             local players = coalition.getPlayers(coalitionId)
             for i, player in ipairs(players) do
                 if player:getID() == unitId then
@@ -111,7 +234,7 @@ do
             end
         else
             -- Check all coalitions
-            for i = 0,2 do
+            for i = 0, 2 do
                 local players = coalition.getPlayers(i)
                 for key, player in pairs(players) do
                     if player:getID() == unitId then
@@ -124,197 +247,838 @@ do
     end
 end
 
+local AIHelpers = {}
+
+do
+    AIHelpers.setDocile = function(unit)
+        Log.info("Setting unit docile: " .. unit:getName())
+
+        local con = unit:getController()
+        con:setOption(0, 4) --hold fire
+        con:setOption(1, 0) --No reaction to threat
+        con:setOption(3, 1) --No radar using
+    end
+
+    local finalAirbases = {}
+    do -- load final airbases
+        for coalition_name, coalition_data in pairs(env.mission.coalition) do
+            if coalition_data.country then
+                for country_index, country_data in pairs(coalition_data.country) do
+                    if country_data.plane and country_data.plane.group then
+                        for _, group in ipairs(country_data.plane.group) do
+                            if group.route and group.route.points then
+                                local count = 0
+                                for _, point in ipairs(group.route.points) do
+                                    count = count + 1
+                                end
+
+                                if #group.route.points > 0 then
+                                    local lastpoint = group.route.points[count]
+                                    if lastpoint.action and lastpoint.action == "Landing" then
+                                        local landingPoint = {
+                                            airdromeId = lastpoint.airdromeId,
+                                            x = lastpoint.x,
+                                            y = lastpoint.y,
+                                            alt = lastpoint.alt,
+                                            speed = lastpoint.speed,
+                                        }
+
+                                        finalAirbases[group.name] = landingPoint
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    AIHelpers.sendRTB = function(unit)
+        local groupName = unit:getGroup():getName()
+        local airbaseData = finalAirbases[groupName]
+
+        if airbaseData == nil then
+            return --TODO: If no RTB base was added
+        end
+
+        local currentPosition = unit:getPoint()
+
+        local task = {
+            id = "Mission",
+            params = {
+                airborne = true, -- RTB mission generally are given to airborne units
+                route = {
+                    points = {
+                        [1] = {
+                            ["alt"] = 2000,
+                            ["action"] = "Turning Point",
+                            ["alt_type"] = "BARO",
+                            ["speed"] = 220.97222222222,
+                            ["task"] = 
+                            {
+                                ["id"] = "ComboTask",
+                                ["params"] = 
+                                {
+                                    ["tasks"] = 
+                                    {
+                                        [1] = 
+                                        {
+                                            ["enabled"] = true,
+                                            ["auto"] = false,
+                                            ["id"] = "WrappedAction",
+                                            ["number"] = 1,
+                                            ["params"] = 
+                                            {
+                                                ["action"] = 
+                                                {
+                                                    ["id"] = "Option",
+                                                    ["params"] = 
+                                                    {
+                                                        ["value"] = 4,
+                                                        ["name"] = 0,
+                                                    }, -- end of ["params"]
+                                                }, -- end of ["action"]
+                                            }, -- end of ["params"]
+                                        }, -- end of [1]
+                                        [2] = 
+                                        {
+                                            ["enabled"] = true,
+                                            ["auto"] = false,
+                                            ["id"] = "WrappedAction",
+                                            ["number"] = 2,
+                                            ["params"] = 
+                                            {
+                                                ["action"] = 
+                                                {
+                                                    ["id"] = "Option",
+                                                    ["params"] = 
+                                                    {
+                                                        ["value"] = 0,
+                                                        ["name"] = 3,
+                                                    }, -- end of ["params"]
+                                                }, -- end of ["action"]
+                                            }, -- end of ["params"]
+                                        }, -- end of [2]
+                                        [3] = 
+                                        {
+                                            ["enabled"] = true,
+                                            ["auto"] = false,
+                                            ["id"] = "WrappedAction",
+                                            ["number"] = 3,
+                                            ["params"] = 
+                                            {
+                                                ["action"] = 
+                                                {
+                                                    ["id"] = "Option",
+                                                    ["params"] = 
+                                                    {
+                                                        ["value"] = 0,
+                                                        ["name"] = 1,
+                                                    }, -- end of ["params"]
+                                                }, -- end of ["action"]
+                                            }, -- end of ["params"]
+                                        }, -- end of [3]
+                                    }, -- end of ["tasks"]
+                                }, -- end of ["params"]
+                            }, -- end of ["task"]
+                            ["type"] = "Turning Point",
+                            ["ETA"] = 419.83667467719,
+                            ["ETA_locked"] = false,
+                            ["y"] = airbaseData.y,
+                            ["x"] = airbaseData.x,
+                            ["speed_locked"] = true,
+                            ["formation_template"] = "",
+                        },
+                        [2] = {
+                            alt = airbaseData.alt,
+                            action = "Landing",
+                            alt_type = "BARO",
+                            speed = airbaseData.speed,
+                            ETA = 0,
+                            ETA_locked = false,
+                            x = airbaseData.x,
+                            y = airbaseData.y,
+                            speed_locked = true,
+                            formation_template = "",
+                            airdromeId = airbaseData.airdromeId,
+                            type = "Land",
+                            task = {
+                                id = "ComboTask",
+                                params = {
+                                    tasks = {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        local con = unit:getController()
+        con:setTask(task)
+
+        Log.info("Sending Unit RTB: " .. unit:getName())
+
+    end
+end
+
+---@class Notifier
+---@field private config NotificationConfig
 local Notifier = {}
 do
-    local NameToCallSign = function(name)
+
+    ---@class NotificationConfig
+    ---@field CallsignDelimiter string
+
+    ---comment
+    ---@param config NotificationConfig
+    ---@return Notifier
+    function Notifier.New(config)
+        Notifier.__index = Notifier
+        local self = setmetatable({}, Notifier)
+        self.config = config
+
+        return self
+    end
+
+    ---@private
+    function Notifier:NameToCallSign(name)
         local split = Util.split_string(name or "", Config.CallSignDelimiter)
         local controllerFriendlyName = split[1]
         return controllerFriendlyName
     end
 
-    local NotifyMissed = function(shooter)
+    ---@param shooter table
+    function Notifier:NotifyMissed(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
-        local friendlyName = NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. "killed", 1)
-        trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. Config.Messages.CopyShotMessage, Config.Delays.DeathMessageOnScreenSeconds)
+        local friendlyName = self:NameToCallSign(name)
+        net.send_chat_to(friendlyName .. ": " .. "PK Miss", 1)
+        trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. Config.Messages.MissMessage,
+            Config.Delays.MissMessageOnScreen)
+    end
+
+    ---@param shooter table
+    ---@param delaySeconds number
+    function Notifier:NotifyMissedDelayed(shooter, delaySeconds)
         
+        local notify = function(input, time)
+            input.notifier:NotifyMissed(input.shooter)
+            return nil
+        end
+
+        timer.scheduleFunction(notify, { notifier = self, shooter = shooter }, timer.getTime() + delaySeconds)
     end
 
-    Notifier.NotifyMissedDelayed = function(shooter, delaySeconds)
-        timer.scheduleFunction(NotifyMissed, shooter, timer.getTime() + delaySeconds)
+    ---@param target table
+    function Notifier:NotifyKilled(target)
+        local name = target:getName()
+        if target.getPlayerName then
+            name = target:getPlayerName() or target:getName()
+        end
+        local friendlyName = self:NameToCallSign(name)
+
+        local message = Config.Messages.KilledMessage:gsub("{{ callsign }}", friendlyName):gsub("{{callsign}}", friendlyName)
+
+        net.send_chat_to(friendlyName .. ": " .. Config.Messages.KilledMessage, 1)
+
+        if target.getID then
+            trigger.action.outTextForUnit(target:getID(), message, Config.Delays.DeathMessageOnScreenSeconds)
+        end
     end
 
-    Notifier.NotifyKilled = function(target, delaySeconds)
-        local name = target:getPlayerName() or target:getCallsign()
-        local friendlyName = NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. Config.Messages.ShotMessage, 1)
-        trigger.action.outTextForUnit(target:getID(), friendlyName .. " " .. Config.Messages.KilledMessage, Config.Delays.DeathMessageOnScreenSeconds)
-    end
-
-    Notifier.NotifyHit = function(target, delaySeconds)
-
-    end
-
-    local CopyShot = function(shooter)
+    ---@param shooter table
+    function Notifier:NotifyKill(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
-        local friendlyName = NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. "killed", 1)
+        local friendlyName = self:NameToCallSign(name)
+        net.send_chat_to(friendlyName .. ": " .. "PK Hit", 1)
+        trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. Config.Messages.HitMessage,
+            Config.Delays.MissMessageOnScreen)
+    end
+
+    ---@param shooter table
+    ---@param delaySeconds number
+    function Notifier:NotifyKillDelayed(shooter, delaySeconds)
+        local notify = function(input, time)
+            input.notifier:NotifyKill(input.shooter)
+            return nil
+        end
+
+        timer.scheduleFunction(notify, { notifier = self, shooter = shooter } , timer.getTime() + delaySeconds)
+    end
+
+    ---@param shooter table
+    function Notifier:NotifyGunKill(shooter)
+        local name = shooter:getPlayerName() or shooter:getCallsign()
+        local friendlyName = self:NameToCallSign(name)
+        net.send_chat_to(friendlyName .. ": " .. "Gun kill", 1)
+        trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. "Good guns, target killed",
+            Config.Delays.MissMessageOnScreen)
+    end
+
+    ---@param shooter table
+    ---@param delaySeconds number
+    function Notifier:NotifyGunKillDelayed(shooter, delaySeconds)
+        if delaySeconds <= 1 then
+            self:NotifyGunKill(shooter)
+        else
+            local notify = function(input, time)
+                input.notifier:NotifyGunKill(input.shooter)
+                return nil
+            end
+
+            timer.scheduleFunction(notify, { notifier = self, shooter = shooter }, timer.getTime() + delaySeconds)
+        end
+    end
+
+    ---@param shooter table
+    function Notifier:CopyShot(shooter)
+        local name = shooter:getPlayerName() or shooter:getCallsign()
+        local friendlyName = self:NameToCallSign(name)
         trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. Config.Messages.CopyShotMessage, 5)
     end
 
-    Notifier.CopyShot = function(shooter, delaySeconds)
-        timer.scheduleFunction(CopyShot, shooter, timer.getTime() + delaySeconds)
+    ---@param shooter table
+    ---@param delaySeconds number
+    function Notifier:CopyShotDelayed(shooter, delaySeconds)
+
+        local notify = function(input, time)
+            input.notifier:CopyShot(input.shooter)
+            return nil
+        end
+
+        timer.scheduleFunction(notify, { notifier = self, shooter = shooter }, timer.getTime() + delaySeconds)
+    end
+
+    ---@param shooter table
+    function Notifier:DenyShot(shooter)
+        local name = shooter:getPlayerName() or shooter:getCallsign()
+        local friendlyName = self:NameToCallSign(name)
+        trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. "Shot scrapped", 5)
+    end
+
+    ---@param unit table
+    function Notifier:NotifyInvinsible(unit)
+        Log.info("Set unit immortal: " .. unit:getName())
+        trigger.action.outTextForUnit(unit:getID(), "Invinsibility activated", 3)
+    end
+
+    ---@param unit table
+    function Notifier:NotifyNotInvinsible(unit)
+        Log.info("Set unit not immortal: " .. unit:getName())
+        trigger.action.outTextForUnit(unit:getID(), "Invinsibility de-activated", 3)
     end
 end
 
 Log.info("Initiating ...")
 
+---@class UnitManager
+---@field private dead_players table<string, boolean>
+---@field private dead_units table<string, boolean>
+---@field private bullet_hits table<string, integer>
+---@field private missile_hits table<string, integer>
+---@field private _notifier Notifier
+---@field private invincibilityManager InvincibilityManager
 local UnitManager = {}
-do
-    local dead_units = {}
-    local bullet_hits = {}
-    local missile_hits = {}
+do --- UnitManager
+    
+
+    ---comment
+    ---@param invincibilityManager InvincibilityManager
+    ---@param notifier Notifier
+    ---@return UnitManager
+    function UnitManager.New(invincibilityManager, notifier)
+        UnitManager.__index = UnitManager
+        local self = setmetatable({}, UnitManager)
+
+        self.dead_players = {}
+        self.dead_units = {}
+        self.bullet_hits = {}
+        self.missile_hits = {}
+        self.invincibilityManager = invincibilityManager
+        self._notifier = notifier
+        
+        return self
+    end
 
     ---Checks if unit is alive according to the simulation
-    ---@param unitId integer
+    ---@param unitName string
     ---@return boolean
-    UnitManager.isUnitAlive = function(unitId)
-        local id = tostring(unitId)
-        if dead_units[id] == true then
-            return true
+    function UnitManager:isUnitAlive(unitName)
+        if self.dead_units[unitName] == true then
+            return false
         end
         return true
     end
 
-    ---Registers a hit
-    ---@param target table
-    ---@param weapon table
-    UnitManager.registerHit = function(target, shooter, weapon)
-        if weapon:getDesc().category == Weapon.Category.SHELL then
-            if not bullet_hits[target:getName()] then
-                bullet_hits[target:getName()] = 0
-            end
-            
-            bullet_hits[target:getName()] = bullet_hits[target:getName()] + 1
-
-            if bullet_hits[target:getName()] >= Config.KillParameters.Bullets then
-                UnitManager.markUnitDead(target)
+    function UnitManager:getDeadPlayers()
+        local result = {}
+        for unitName, isDead in pairs(self.dead_players) do
+            if isDead == true then
+                table.insert(result, unitName)
             end
         end
-
-        if weapon:getDesc().category == Weapon.Category.MISSILE then
-            if not missile_hits[target:getName()] then
-                missile_hits[target:getName()] = 0
-            end
-
-            missile_hits[target:getName()] = missile_hits[target:getName()] + 1
-
-            if missile_hits[target:getName()] >= Config.KillParameters.Missiles then
-                UnitManager.markUnitDead(target)
-            end
-        end
-
     end
 
-    UnitManager.markUnitDead = function(unit)
+    ---Registers a hit
+    ---@param target table
+    ---@param shooter table
+    ---@param weapon table
+    function UnitManager:registerHit(target, shooter, weapon)
+        if Object.getCategory(weapon) == Object.Category.WEAPON then
+            if weapon:getDesc().category == Weapon.Category.SHELL then
+                if self:isUnitAlive(shooter:getName()) == false then
+                    return --if hit by a bullet from a dead unit the hit does not count
+                end
+    
+                if not self.bullet_hits[target:getName()] then
+                    self.bullet_hits[target:getName()] = 0
+                end
+    
+                self.bullet_hits[target:getName()] = self.bullet_hits[target:getName()] + 1
+    
+                if self.bullet_hits[target:getName()] >= Config.KillParameters.Bullets then
+                    self:markUnitDead(target)
+                    self._notifier:NotifyGunKillDelayed(shooter, Config.Delays.GunKillDelay)
+                end
+            elseif weapon:getDesc().category == Weapon.Category.MISSILE then
+                if not self.missile_hits[target:getName()] then
+                    self.missile_hits[target:getName()] = 0
+                end
+    
+                self.missile_hits[target:getName()] = self.missile_hits[target:getName()] + 1
+    
+                if self.missile_hits[target:getName()] >= Config.KillParameters.Missiles then
+                    self._notifier:NotifyKillDelayed(shooter, Config.Delays.MissileKillDelay)
+                    self:markUnitDead(target)
+                end
+            end
+        elseif Object.getCategory(weapon) == Object.Category.UNIT then
 
+
+            local targetName = "nil"
+            if target.getName then
+                targetName = target:getName()
+            end
+
+            self.invincibilityManager:setMortal(weapon)
+            trigger.action.explosion(weapon:getPoint(), 30)
+
+        end
+    end
+
+    function UnitManager:markUnitAlive(unit)
+        Log.info("Marking " .. unit:getName() .. " as alive")
+        self.dead_units[unit:getName()] = false
+        self.bullet_hits[unit:getName()] = 0
+        self.missile_hits[unit:getName()] = 0
+    end
+
+    ---comment
+    ---@param unit table
+    function UnitManager:markUnitDead(unit)
         Log.info("Marking " .. unit:getName() .. " as dead")
-        Notifier.NotifyKilled(unit)
+        self._notifier:NotifyKilled(unit)
 
-        local function SetInvisible(unit)
-            Parameters = { 
-                id = 'SetInvisible', 
-                params = { 
-                    value = true 
-                }
+        local commmand = {
+            id = 'SetInvisible',
+            params = {
+                value = true
             }
-            unit:getController():setCommand(Parameters)
+        }
+
+        if unit.getController then
+            if isSinglePlayer == true then
+                unit:getGroup():getController():setCommand(commmand)
+            else
+                unit:getController():setCommand(commmand)
+            end
         end
 
         local function SendAIRtb(unit)
-            --TODO: Send AI RTB
+            AIHelpers.setDocile(unit)
+            AIHelpers.sendRTB(unit)
+            AIHelpers.setDocile(unit)
         end
 
-        dead_units[unit:getName()] = true
-        bullet_hits[unit:getName()] = 0
-        missile_hits[unit:getName()] = 0
+        self.dead_units[unit:getName()] = true
+        self.bullet_hits[unit:getName()] = 0
+        self.missile_hits[unit:getName()] = 0
 
-        SetInvisible(unit)
-        
+
         if Helpers.isPlayer(unit:getID(), unit:getCoalition()) == false then
             SendAIRtb(unit)
         end
     end
 
+    function UnitManager:OnUnitBirth(unit)
+        self.dead_units[unit:getName()] = false
+        self.bullet_hits[unit:getName()] = 0
+        self.missile_hits[unit:getName()] = 0
+    end
+
 end
 
-local MissileManager = {}
-do 
-    local trackMissile = function(data, time)
 
+local RespawnManager = {}
+do
+    --[[
+        TODO: Implement
+    ]]
+
+    RespawnManager.OnRefuelingStart = function(unit)
+        
+    end
+
+
+    do
+        local checkInterval = 5
+        local checkDeadUnits = function(null, time)
+
+
+
+            return time + checkInterval
+        end
+
+        timer.scheduleFunction(checkDeadUnits, {}, timer.getTime() + 5)
+    end
+
+end
+
+---@class InvincibilityManager
+---@field autoCheckInterval number
+---@field private _forcedUnits table<string, boolean>
+---@field private _config InvincibleConfig
+---@field private _invincibleUnits table<string, boolean>
+---@field private _notifier Notifier
+local InvincibilityManager = {}
+do -- InvincibilityManager
+
+    ---comment
+    ---@param self InvincibilityManager
+    ---@param time any
+    local checkInvinsibilityTask = function(self, time)
+        local checkPlanes = function()
+            -- Check all coalitions
+            for i = 0, 2 do
+                local groups = coalition.getGroups(i, 0)
+                for _, group in ipairs(groups) do
+                    if group and group:isExist() then
+                        for _, unit in ipairs(group:getUnits()) do
+                            if unit then
+                                self:CheckUnit(unit)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        checkPlanes()
+        return time + self.autoCheckInterval
+    end
+
+    ---@class InvincibleConfig
+    ---@field autoEnable boolean
+    ---@field autoOutsideZone boolean
+
+    ---comment
+    ---@param config InvincibleConfig
+    ---@param notifier Notifier
+    ---@return InvincibilityManager
+    function InvincibilityManager.New(config, notifier)
+        InvincibilityManager.__index = InvincibilityManager
+        local self = setmetatable({}, InvincibilityManager)
+        self._config = config
+        self._forcedUnits = {}
+        self._invincibleUnits = {}
+        self._notifier = notifier
+        self.autoCheckInterval = 5
+
+        if config.autoEnable == true then
+            timer.scheduleFunction(checkInvinsibilityTask, self, timer.getTime() + 5)
+        end
+        return self
+    end 
+
+    function InvincibilityManager:resetUnit(unit)
+        self._forcedUnits[unit:getName()] = nil
+    end
+
+    ---comment
+    ---@param unit table
+    function InvincibilityManager:setMortal(unit, force)
+        SetImmortal = {
+            id = 'SetImmortal',
+            params = {
+                value = false
+            }
+        }
+
+        if unit.getController and unit.getName and (self._forcedUnits[unit:getName()] ~= true or force == true) then
+            if isSinglePlayer == true then 
+                unit:getGroup():getController():setCommand(SetImmortal)
+            else
+                unit:getController():setCommand(SetImmortal)
+            end
+            
+            self._invincibleUnits[unit:getName()] = false
+
+            if force == true then
+                self._forcedUnits[unit:getName()] = true
+            end
+
+            self._notifier:NotifyNotInvinsible(unit)
+        end
+    end
+
+    
+    function InvincibilityManager:setImmortal(unit, force)
+        SetImmortal = {
+            id = 'SetImmortal',
+            params = {
+                value = true
+            }
+        }
+
+        if unit.getController and unit.getName and (self._forcedUnits[unit:getName()] ~= true or force == true) then
+            if isSinglePlayer == true then 
+                unit:getGroup():getController():setCommand(SetImmortal)
+            else
+                unit:getController():setCommand(SetImmortal)
+            end
+            
+            self._invincibleUnits[unit:getName()] = true
+            
+            if force == true then
+                self._forcedUnits[unit:getName()] = true
+            end
+
+            self._notifier:NotifyInvinsible(unit)
+        end
+    end
+
+    function InvincibilityManager:CheckUnit(unit)
+        if self._forcedUnits[unit:getName()] == true then
+            return
+        end
+
+        local isPlayer = function(unit)
+            local players = coalition.getPlayers(unit:getCoalition())
+            for _, player in pairs(players) do
+                if player:getID() == unit:getID() then
+                    return true
+                end
+            end
+            return false
+        end
+
+        ---@return boolean
+        local shouldBeInvinsible = function()
+            return true
+        end
+
+        if unit:getDesc().category == Unit.Category.AIRPLANE or unit:getDesc().category == Unit.Category.HELICOPTER then
+            if shouldBeInvinsible() == true then
+                if self._invincibleUnits[unit:getName()] ~= true then
+                    self:setImmortal(unit)
+                end
+            else
+                if self._invincibleUnits[unit:getName()] ~= false then
+                    self:setMortal(unit)
+                end
+            end
+        end
+    end
+end
+
+
+
+
+---@class MissileManager
+---@field private _missileSpeeds table<string, number>
+---@field private _closingSpeeds table<string, table<integer, number>>
+---@field private _notifier Notifier
+local MissileManager = {}
+do
+    ---comment
+    ---@param notifier Notifier
+    ---@return MissileManager
+    function MissileManager.New(notifier)
+        MissileManager.__index = MissileManager
+        local self = setmetatable({}, MissileManager)
+
+        self._missileSpeeds = {}
+        self._closingSpeeds = {}
+        self._notifier = notifier
+
+        return self
+    end
+
+
+    ---@class MissileTrackingData
+    ---@field shooter table
+    ---@field missile table
+    ---@field shotlocation table
+    ---@field target table
+    
+    ---@param data MissileTrackingData
+    ---@param time unknown
+    ---@return nil
+    function MissileManager:trackMissile(data, time)
         local distance = function(a, b)
             return math.sqrt((b.x - a.x) ^ 2 + (b.z - a.z) ^ 2)
         end
 
         local isMissilePastTarget = function(shotLocation, missileLocation, targetLocation)
-
             local a = shotLocation
             local b = targetLocation
             local c = missileLocation
-            
-            local ab = distance(a,b)
-            local ac = distance(a,c)
 
-            if ab - 100 > ac then
+            local ab = distance(a, b)
+            local ac = distance(a, c)
+
+            if ac - 100 > ab then
                 return true
             end
 
             return false
         end
 
+        local isDecelerating = function(missile)
+            local id = tostring(Object.getName(missile))
+
+            local velocityVec = missile:getVelocity()
+            local currentSpeed = Helpers.vecToMs(velocityVec)
+
+            if not self._missileSpeeds[id] then
+                self._missileSpeeds[id] = currentSpeed
+            end
+
+            local lastSpeed =self._missileSpeeds[id]
+            local isSlowing = lastSpeed > currentSpeed
+
+            return isSlowing, currentSpeed
+        end
+
+
+        local closingSpeed = function(missile, target)
+            local relativeVector = Helpers.vecSub(missile:getVelocity(), target:getVelocity())
+
+            local isCold = Helpers.vecAlignment(relativeVector, target:getVelocity()) > 0
+
+            if isCold == false then
+                return 0 - Helpers.vecToMs(relativeVector)
+            else
+                return Helpers.vecToMs(relativeVector)
+            end
+        end
+
         local target = data.target
         local missile = data.missile
-        local shotLocation = data.shotLocation
-        local shooterName = data.shooterName
+        local shotLocation = data.shotlocation
+        local shooter = data.shooter
 
         if missile:isExist() == false or target:isExist() == false then
             return nil
         end
 
-        if isMissilePastTarget(shotLocation, missile:getPoint(), target:getLocation()) == true then
-            Notifier.NotifyMissedDelayed(shooterName, Config.Delays.MissDelay or 5)
+        if isMissilePastTarget(shotLocation, missile:getPoint(), target:getPoint()) == true then
+            self._notifier:NotifyMissedDelayed(shooter, Config.Delays.MissDelay or 5)
             return nil
+        end
+
+        local decelling, speed = isDecelerating(missile)
+        if decelling == true and speed < 600 then
+            local n = closingSpeed(missile, target)
+            self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] + 1] = n
+            if #self._closingSpeeds[Object.getName(missile)] >= 3 then
+                local nMin1 = self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] - 1]
+                local nMin2 = self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] - 2]
+
+                Log.debug("Checking closing speeds " .. n .. " " .. nMin1 .. " " .. nMin2)
+
+                if nMin2 < 0 and nMin1 < 0 and n < 0 and nMin2 > nMin1 and nMin1 > n then
+                    -- when closing speed is negative and decreasing for 3 checks in a row the missile is trashed
+
+                    --delete missile
+                    missile:destroy()
+                    self._notifier:NotifyMissedDelayed(shooter, Config.Delays.MissDelay or 5)
+                    return nil
+                end
+            end
         end
 
         return time + 2
     end
 
-    MissileManager.trackMissile = function (shooter, target, missile)
-
+    ---@param shooter any
+    ---@param target any
+    ---@param missile any
+    function MissileManager:startTrackingMissile(shooter, target, missile)
         local data = {
+            self = self,
             target = target,
             missile = missile,
             shotLocation = shooter:getPoint(),
-            shooterName = shooter:getName()
+            shooter = shooter,
+            shotTime = timer.getTime()
         }
 
-        timer.scheduleFunction(trackMissile, data, timer.getTime() + 3)
+        local missileTask = function(passedData, time)
+            return data.self:trackMissile(passedData, time)
+        end
+
+        self._closingSpeeds[Object.getName(missile)] = {} 
+        timer.scheduleFunction(missileTask, data, timer.getTime() + 2)
     end
+
 end
 
+---@class EventHandler
+---@field private _unitManager UnitManager
+---@field private _notifier Notifier
 local EventHandler = {}
-do
+do -- Event Handler
+
+    ---comment
+    ---@param unitManger UnitManager
+    ---@param notifier Notifier
+    ---@return EventHandler
+    function EventHandler.New(unitManger, notifier)
+        EventHandler.__index = EventHandler
+        local self = setmetatable({}, EventHandler)
+        self._unitManager = unitManger
+        self._notifier = notifier
+        return self
+    end
+
     function EventHandler:onEvent(e)
         local id = e.id
-        if id == world.event.S_EVENT_SHOT then
+
+        if id == nil or id == 0 then
+            return
+        end 
+
+        trigger.action.outText("event: " .. e.id, 3)
+
+        if id == world.event.S_EVENT_SHOOTING_START then
+            local shooter = e.initiator
+            if self._unitManager:isUnitAlive(shooter:getName()) == false then
+                self._notifier:DenyShot(shooter)
+            end
+        elseif id == world.event.S_EVENT_SHOT then
             local shooter = e.initiator
             local weapon = e.weapon
 
-            if UnitManager.isUnitAlive(shooter:getID()) == false then
+            if self._unitManager:isUnitAlive(shooter:getName()) == false then
                 weapon:destroy()
-            elseif weapon and weapon:getDesc().category == Weapon.Category.MISSILE then
+                self._notifier:DenyShot(shooter)
+            elseif weapon and weapon:getDesc().category == Weapon.Category.MISSILE
+                and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM
+            then
                 if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
-                    Notifier.CopyShot(shooter, 2)
+                    self._notifier:CopyShotDelayed(shooter, 2)
                     local target = weapon:getTarget() -- can be nil
                     MissileManager.trackMissile(shooter, target, weapon)
                 end
@@ -323,19 +1087,44 @@ do
             local shooter = e.initiator
             local target = e.target
             local weapon = e.weapon
-            UnitManager.registerHit(target, shooter, weapon)
-        elseif id == world.event.S_EVENT_RUNWAY_TAKEOFF then
-            if Config.SetAutoInvulnerable == true then
-                local unit = e.initiator
-                if unit then
-                    --TODO: Set auto invulnerable
+            self._unitManager:registerHit(target, shooter, weapon)
+        elseif id == world.event.S_EVENT_BIRTH then
+            local unit = e.initiator
+            if unit:getCategory() == Object.Category.UNIT then
+                if unit:getDesc().category == Unit.Category.AIRPLANE or unit:getDesc().category == Unit.Category.HELICOPTER then
+                    self._unitManager:OnUnitBirth(e.initiator)
                 end
             end
         end
     end
-
 end
 
-world.addEventHandler(EventHandler)
+
+do -- init config
+    if Config == nil then
+        Config = {}
+    end
+
+    if Config.AutoInvulnerableSettings == nil then
+        Config.AutoInvulnerableSettings = {}
+    end
+end
+
+---@type NotificationConfig
+local notificationConfig = {
+    CallsignDelimiter = Config.CallSignDelimiter or "|"
+}
+local notifier = Notifier.New(notificationConfig)
+
+---@type InvincibleConfig
+local invincibilityConfig = {
+    autoEnable = Config.AutoInvulnerableSettings.Enabled or true,
+    autoOutsideZone = Config.AutoInvulnerableSettings.OutsideVulnerableZone or true
+}
+
+local invisibilityManager = InvincibilityManager.New(invincibilityConfig, notifier)
+local unitManager = UnitManager.New(invisibilityManager, notifier)
+local eventHandler = EventHandler.New(unitManager, notifier)
+world.addEventHandler(eventHandler)
 
 Log.info("Started")
