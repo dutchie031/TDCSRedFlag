@@ -1,33 +1,69 @@
 --=========================================
 
 -- BIG NOTE!!!
--- This script only works in DCS when it's being run a Dedicated Server.
+-- This script only works properly in DCS when it's being run on a Dedicated Server.
 -- This is due to a player slot or a client slot that has the same userID (when run from the game itself) the unit commands on the host don't work.
-
 
 --[[
 
 TDCS Red Flag is meant to create an environment where players can practice and fly without having to respawn like one would in a RED Flag event. 
+It is meant so a full mission can be flown and debriefed. Flying the way back even when being "hit" when rolling into the target area.
 
-Currently Implemented: 
+The script still aims to reflect realism, crashing into the ground is still being detected for instance. 
 
-- Killed calls
-- Hit calls (delayed)
-- PK Miss for missiles
-- Gun kills (after X rounds)
-- Missile kills
+## Disclaimer
 
-- AI RTB after being killed
+The goal of this script is to be generic. This does mean it does cover multiple use cases and can be altered by changing settings. 
+However, this does not mean it covers all use cases one can think of. 
+Sometimes the default or minimal implementation does not fit a specific use case. 
+However in some cases the implementation chosen might not be configurable as for 90% of the use cases it will be the same. 
+If indeed you need to have the implementation for the 10% please reach out to talk about it.
+
+## Currently Implemented: 
+
+### AA Missile Tracking
+
+Missiles being fired are tracked and the units are being updated on their status. 
+"PK Miss" and "PK Hit" to indicate effectiveness of the fired missilse.
+    
+### Unit kill events
+
+If a unit does get hit by a missile (SAM, AA, etc.) the unit itself will receive a message. (Configurable through `Config.Messages.PlayersMessages`).
+When a unit is dead the unit is set to "invisible". This will inhibit AI to be able to fire on it.
+If the unit is AI it will also be set to "HOLD FIRE", "INHIBIT RADAR" and will flow away from the action. 
+Players will have to be instructed themselves to flow away. 
+
+If LotATC (or another controller) clients are connected they will receive seperate message. (Configurable through `Config.Messages.ControllerMessages`)
+This way controllers will be 
+
+### Dead units don't kill
+
+Units that are dead can't kill anyone. 
 
 - When dead all weapons will be deleted after being fired.
 
 - Invisible after being shot. (No AI will shoot you)
 - Auto immortal
+- Crash Detection.
+    Invincible does not mean the ground suddenly becomes a soft cushion. 
+    The script will try and detect crashes with the ground, trees and buildings and will detect 
 
-- Respawn:
- - zones
- - AAR
- - Landing
+## To be implemented:
+
+### Respawn Zones
+
+When player units die, they can be "reset". 
+For instance when a player refuels, lands or flies in a pre-designated zone.
+
+
+### Unlimited Weapons support
+
+Better logic and support for unlimited weapons might be added. 
+Tracking weapon usage and having "REARM ZONES". 
+Sadly DCS doesn't have scripting possibilities to make this easier.
+
+
+
 ]]--
 
 --=========================================
@@ -49,6 +85,46 @@ local Config = {
     -- Done on a unit basis
     PlayersOnly = false,
     
+    -- Mad Dog behaviour of AA missiles
+    -- CURRENTLY NOT IMPLEMENTED
+    MadDog = {
+        --[[
+            "Mad Dogging" missiles is firing a missile without initial guidance. 
+
+            Different behaviours will be available in this red flag script. 
+            Place the "number" of the needed behaviour in the tab below.
+
+            Before choosing: 
+                - In non "Mad Dog" circumstances the "Intended Target" is known when off the rails. 
+                  A Fox3 Missile will still have a "target" even when the target is fed by the host aircraft.
+
+            0 Allow (default)
+                Does allow for maddog shots. Will keep tracking missiles until it impacts a missile. 
+                "HIT" will be called when a missile does indeed hit a target. 
+
+                "MISS" will be called after 30 seconds of no target or the missile hits the ground before that.
+                If the missile does gain a target the first target will be used as intended target. 
+                All subsequent targets will be disregarded. (target swapping not possible)
+                If it does swap targets the missile will be deleted and a 10 seconds delayed "MISS" call will be triggered. 
+                
+            1 Automatic Miss
+                If a missile is fired without an intended target the missile will always be called a miss.
+                This mode doesn't allow for pilots to be lucky, but still makes them think they have a chance. 
+                "Copy Shot" will be called. 
+                The missile will be tracked. When a hit is detected the kill is denied and "PK MISS" is called. 
+                When the missile does indeed miss "PK MISS" is called just like it does normally.
+
+            2 Decline Shots
+                All shots that do not have a target off the rails will be deleted and a message will be displayed that the shot was denied. 
+                Players do lose their missile if unlimited weapons were not enabled.
+        ]]--
+        Behaviour = 0
+    },
+    DeadUnitWeapons = {
+
+        
+
+    },
     -- Delays are in seconds
     Delays = {
         MissDelay = 6,
@@ -61,14 +137,15 @@ local Config = {
         --- replaceable variables:
         --- {{ callsign }} => replaces with the callsign (delimited first part)
 
-        KilledMessage = "{{ callsign }}, You are dead, flow away from the action",
-        MissMessage = "PK Miss",
-        HitMessage = "PK Hit",
-        CopyShotMessage = "{{ callsign }}, Copy Shot",
-        GunKillMessage = "{{ callsign }}, Good guns, splash one",
-
+        PlayerMessages = {
+            KilledMessage = "{{ callsign }}, You are dead, flow away from the action",
+            MissMessage = "PK Miss",
+            HitMessage = "PK Hit",
+            CopyShotMessage = "{{ callsign }}, Copy Shot",
+            GunKillMessage = "{{ callsign }}, Good guns, splash one",
+        },
         --- Messages that are sent to the server for LotATC and other tool users.
-        ServerMessages = {
+        ControllerMessages = {
             UnitKilled = "{{ callsign }}, killed"
             
         }
@@ -118,6 +195,13 @@ local Config = {
 
 --[[
 
+DeadUnits: 
+
+TODO: A-G munitions on dead units. Still fly the pattern. 
+Options. 
+    1. Delete AG weapons immediately
+    2. Delete AG weapons just before impact (tacview debreifable)
+    3. don't delete AG weapons and still have them impact. 
 
 MissileTracker:
 TODO: MadDogged missiles.
@@ -128,6 +212,11 @@ TODO: Helicopter Difference?
 TODO: Gear up parameters fpm
 TODO: Landing on buildings?
 TODO: Over G ? 
+
+BombTracker: 
+
+TODO: Practice Bombs 
+(This might better help with "unlimited weapons" options)
 
 ]]--
 
@@ -1094,26 +1183,43 @@ do
 end
 
 
----@class MissileManager
+---@class WeaponManager
 ---@field private _missileSpeeds table<string, number>
 ---@field private _closingSpeeds table<string, table<integer, number>>
 ---@field private _notifier Notifier
-local MissileManager = {}
+---@field private _unitManager UnitManager
+local WeaponManager = {}
 do
     ---comment
     ---@param notifier Notifier
-    ---@return MissileManager
-    function MissileManager.New(notifier)
-        MissileManager.__index = MissileManager
-        local self = setmetatable({}, MissileManager)
+    ---@param unitManager UnitManager
+    ---@return WeaponManager
+    function WeaponManager.New(notifier, unitManager)
+        WeaponManager.__index = WeaponManager
+        local self = setmetatable({}, WeaponManager)
 
         self._missileSpeeds = {}
         self._closingSpeeds = {}
         self._notifier = notifier
+        self._unitManager = unitManager
 
         return self
     end
 
+    function WeaponManager:weaponFired(shooter, weapon)
+        if self._unitManager:isUnitAlive(shooter:getName()) == false then
+            weapon:destroy()
+            self._notifier:DenyShot(shooter)
+        elseif weapon and weapon:getDesc().category == Weapon.Category.MISSILE
+            and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM
+        then
+            if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
+                self._notifier:CopyShotDelayed(shooter, 2)
+                local target = weapon:getTarget() -- can be nil
+                self:startTrackingMissile(shooter, target, weapon)
+            end
+        end
+    end
 
     ---@class MissileTrackingData
     ---@field shooter table
@@ -1124,7 +1230,7 @@ do
     ---@param data MissileTrackingData
     ---@param time unknown
     ---@return nil
-    function MissileManager:trackMissile(data, time)
+    function WeaponManager:trackMissile(data, time)
         local distance = function(a, b)
             return math.sqrt((b.x - a.x) ^ 2 + (b.z - a.z) ^ 2)
         end
@@ -1211,10 +1317,11 @@ do
         return time + 2
     end
 
+    ---@private
     ---@param shooter any
     ---@param target any
     ---@param missile any
-    function MissileManager:startTrackingMissile(shooter, target, missile)
+    function WeaponManager:startTrackingMissile(shooter, target, missile)
         ---@type MissileTrackingData
         local data = {
             self = self,
@@ -1239,7 +1346,7 @@ end
 ---@field private _unitManager UnitManager
 ---@field private _notifier Notifier
 ---@field private _crashManager CrashManager
----@field private _missileManager MissileManager
+---@field private _weaponsManager WeaponManager
 local EventHandler = {}
 do -- Event Handler
 
@@ -1247,15 +1354,15 @@ do -- Event Handler
     ---@param unitManger UnitManager
     ---@param notifier Notifier
     ---@param crashManager CrashManager
-    ---@param missileManager MissileManager
+    ---@param weaponManager WeaponManager
     ---@return EventHandler
-    function EventHandler.New(unitManger, notifier, crashManager, missileManager)
+    function EventHandler.New(unitManger, notifier, crashManager, weaponManager)
         EventHandler.__index = EventHandler
         local self = setmetatable({}, EventHandler)
         self._unitManager = unitManger
         self._notifier = notifier
         self._crashManager = crashManager
-        self._missileManager = missileManager
+        self._weaponsManager = weaponManager
         return self
     end
 
@@ -1276,19 +1383,7 @@ do -- Event Handler
         elseif id == world.event.S_EVENT_SHOT then
             local shooter = e.initiator
             local weapon = e.weapon
-
-            if self._unitManager:isUnitAlive(shooter:getName()) == false then
-                weapon:destroy()
-                self._notifier:DenyShot(shooter)
-            elseif weapon and weapon:getDesc().category == Weapon.Category.MISSILE
-                and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM
-            then
-                if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
-                    self._notifier:CopyShotDelayed(shooter, 2)
-                    local target = weapon:getTarget() -- can be nil
-                    self._missileManager:startTrackingMissile(shooter, target, weapon)
-                end
-            end
+            self._weaponsManager:weaponFired(shooter, weapon)
         elseif id == world.event.S_EVENT_HIT then
             local shooter = e.initiator
             local target = e.target
@@ -1332,11 +1427,13 @@ local invincibilityConfig = {
     autoOutsideZone = Config.AutoInvulnerableSettings.OutsideVulnerableZone or true
 }
 
-local missileManager = MissileManager.New(notifier)
 local invisibilityManager = InvincibilityManager.New(invincibilityConfig, notifier)
-local crashManager = CrashManager.New(invisibilityManager)
 local unitManager = UnitManager.New(invisibilityManager, notifier)
-local eventHandler = EventHandler.New(unitManager, notifier, crashManager, missileManager)
+local weaponsManager = WeaponManager.New(notifier, unitManager)
+
+local crashManager = CrashManager.New(invisibilityManager)
+
+local eventHandler = EventHandler.New(unitManager, notifier, crashManager, weaponsManager)
 world.addEventHandler(eventHandler)
 
 Log.info("Started")
