@@ -38,7 +38,31 @@ This way controllers will be
 
 ### Dead units don't kill
 
-Units that are dead can't kill anyone. 
+Fireballs don't shoot missiles, however there's been a few different implementations created of which you can pick and choose.
+The logic is split up in AA munitions and AG munitions to make it as tunable as possible.
+
+#### Air-to-Air Munitions
+
+Configurable in `Config.DeadUnitWeapons.AAWeaponsBehaviour`.
+
+Behaviours: 
+
+0: Remove All (default)
+For A2A weapons the default behaviour is to remove the weapon and notify the user the shot is denied. 
+The missile is deleted entirely from the mission environment.
+
+1: No Action
+Missiles will not be removed. Hits and misses will be registered.
+
+#### Air-to-Ground Munitions
+
+Configurable in `Config.DeadUnitWeapons.AGWeaponsBehaviour`.
+
+0: Remove All (default)
+For A2A weapons the default behaviour is to remove the weapon and notify the user the shot is denied. 
+The missile is deleted entirely from the mission environment.
+
+1: 
 
 - When dead all weapons will be deleted after being fired.
 
@@ -54,7 +78,6 @@ Units that are dead can't kill anyone.
 
 When player units die, they can be "reset". 
 For instance when a player refuels, lands or flies in a pre-designated zone.
-
 
 ### Unlimited Weapons support
 
@@ -121,8 +144,8 @@ local Config = {
         Behaviour = 0
     },
     DeadUnitWeapons = {
-
-        
+        AAWeaponsBehaviour = 0,
+        AGWeaponsBehaviour = 0
 
     },
     -- Delays are in seconds
