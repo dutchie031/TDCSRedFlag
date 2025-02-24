@@ -39,6 +39,9 @@ This way controllers will be
 ### Dead units don't kill
 
 Units that are dead can't kill anyone. 
+However, if you want you can have them fly their AG drop anyway. 
+
+
 
 - When dead all weapons will be deleted after being fired.
 
@@ -47,6 +50,15 @@ Units that are dead can't kill anyone.
 - Crash Detection.
     Invincible does not mean the ground suddenly becomes a soft cushion. 
     The script will try and detect crashes with the ground, trees and buildings and will detect 
+
+### Mad Dog logic
+
+TODO: Write Mad Dog Docs
+
+
+
+
+
 
 ## To be implemented:
 
@@ -1218,6 +1230,8 @@ do
                 local target = weapon:getTarget() -- can be nil
                 self:startTrackingMissile(shooter, target, weapon)
             end
+        else
+            Log.debugOutText("weapon fired", 3)
         end
     end
 
@@ -1340,6 +1354,22 @@ do
         timer.scheduleFunction(missileTask, data, timer.getTime() + 2)
     end
 
+    ---@class AgMunitionData
+    ---@field shooter table
+    ---@field weapon table
+
+    ---@param data AgMunitionData
+    function WeaponManager:trackAgMunition(data, time)
+
+        return time + 1
+    end
+
+    ---@private
+    ---@param shooter table
+    ---@param weapon table
+    function WeaponManager:startTrackingAgMunition(shooter, weapon)
+
+    end
 end
 
 ---@class EventHandler
