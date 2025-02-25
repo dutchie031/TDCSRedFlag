@@ -9,7 +9,8 @@
         "world",
         "Weapon",
         "trigger",
-        "Object"
+        "Object",
+        "land"
     ],
     "todo-tree.tree.scanMode": "current file"
 }

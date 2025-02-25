@@ -4,100 +4,6 @@
 -- This script only works properly in DCS when it's being run on a Dedicated Server.
 -- This is due to a player slot or a client slot that has the same userID (when run from the game itself) the unit commands on the host don't work.
 
---[[
-
-TDCS Red Flag is meant to create an environment where players can practice and fly without having to respawn like one would in a RED Flag event. 
-It is meant so a full mission can be flown and debriefed. Flying the way back even when being "hit" when rolling into the target area.
-
-The script still aims to reflect realism, crashing into the ground is still being detected for instance. 
-
-## Disclaimer
-
-The goal of this script is to be generic. This does mean it does cover multiple use cases and can be altered by changing settings. 
-However, this does not mean it covers all use cases one can think of. 
-Sometimes the default or minimal implementation does not fit a specific use case. 
-However in some cases the implementation chosen might not be configurable as for 90% of the use cases it will be the same. 
-If indeed you need to have the implementation for the 10% please reach out to talk about it.
-
-## Currently Implemented: 
-
-### AA Missile Tracking
-
-Missiles being fired are tracked and the units are being updated on their status. 
-"PK Miss" and "PK Hit" to indicate effectiveness of the fired missilse.
-    
-### Unit kill events
-
-If a unit does get hit by a missile (SAM, AA, etc.) the unit itself will receive a message. (Configurable through `Config.Messages.PlayersMessages`).
-When a unit is dead the unit is set to "invisible". This will inhibit AI to be able to fire on it.
-If the unit is AI it will also be set to "HOLD FIRE", "INHIBIT RADAR" and will flow away from the action. 
-Players will have to be instructed themselves to flow away. 
-
-If LotATC (or another controller) clients are connected they will receive seperate message. (Configurable through `Config.Messages.ControllerMessages`)
-This way controllers will be 
-
-### Dead units don't kill
-
-Fireballs don't shoot missiles, however there's been a few different implementations created of which you can pick and choose.
-The logic is split up in AA munitions and AG munitions to make it as tunable as possible.
-
-#### Air-to-Air Munitions
-
-Configurable in `Config.DeadUnitWeapons.AAWeaponsBehaviour`.
-
-Behaviours: 
-
-0: Remove All (default)
-For A2A weapons the default behaviour is to remove the weapon and notify the user the shot is denied. 
-The missile is deleted entirely from the mission environment.
-
-1: No Action
-Missiles will not be removed. Hits and misses will be registered.
-
-#### Air-to-Ground Munitions
-
-Configurable in `Config.DeadUnitWeapons.AGWeaponsBehaviour`.
-
-0: Remove All (default)
-For A2A weapons the default behaviour is to remove the weapon and notify the user the shot is denied. 
-The missile is deleted entirely from the mission environment.
-
-1: 
-
-- When dead all weapons will be deleted after being fired.
-
-- Invisible after being shot. (No AI will shoot you)
-- Auto immortal
-- Crash Detection.
-    Invincible does not mean the ground suddenly becomes a soft cushion. 
-    The script will try and detect crashes with the ground, trees and buildings and will detect 
-
-### Mad Dog logic
-
-TODO: Write Mad Dog Docs
-
-
-
-
-
-
-## To be implemented:
-
-### Respawn Zones
-
-When player units die, they can be "reset". 
-For instance when a player refuels, lands or flies in a pre-designated zone.
-
-### Unlimited Weapons support
-
-Better logic and support for unlimited weapons might be added. 
-Tracking weapon usage and having "REARM ZONES". 
-Sadly DCS doesn't have scripting possibilities to make this easier.
-
-
-
-]]--
-
 --=========================================
 
 
@@ -120,50 +26,19 @@ local Config = {
     -- Mad Dog behaviour of AA missiles
     -- CURRENTLY NOT IMPLEMENTED
     MadDog = {
-        --[[
-            "Mad Dogging" missiles is firing a missile without initial guidance. 
-
-            Different behaviours will be available in this red flag script. 
-            Place the "number" of the needed behaviour in the tab below.
-
-            Before choosing: 
-                - In non "Mad Dog" circumstances the "Intended Target" is known when off the rails. 
-                  A Fox3 Missile will still have a "target" even when the target is fed by the host aircraft.
-
-            0 Allow (default)
-                Does allow for maddog shots. Will keep tracking missiles until it impacts a missile. 
-                "HIT" will be called when a missile does indeed hit a target. 
-
-                "MISS" will be called after 30 seconds of no target or the missile hits the ground before that.
-                If the missile does gain a target the first target will be used as intended target. 
-                All subsequent targets will be disregarded. (target swapping not possible)
-                If it does swap targets the missile will be deleted and a 10 seconds delayed "MISS" call will be triggered. 
-                
-            1 Automatic Miss
-                If a missile is fired without an intended target the missile will always be called a miss.
-                This mode doesn't allow for pilots to be lucky, but still makes them think they have a chance. 
-                "Copy Shot" will be called. 
-                The missile will be tracked. When a hit is detected the kill is denied and "PK MISS" is called. 
-                When the missile does indeed miss "PK MISS" is called just like it does normally.
-
-            2 Decline Shots
-                All shots that do not have a target off the rails will be deleted and a message will be displayed that the shot was denied. 
-                Players do lose their missile if unlimited weapons were not enabled.
-        ]]--
-        Behaviour = 0
+        Behaviour = 0 --DEFAULT: 0
     },
-    DeadUnitWeapons = {
-        AAWeaponsBehaviour = 0,
-        AGWeaponsBehaviour = 0
-
+    DeadUnitWeapons = { -- Behaviour of weapons when launched by a dead unit
+        AAWeaponsBehaviour = 0, --DEFAULT: 0
+        AGWeaponsBehaviour = 2  --DEFAULT: 0
     },
     -- Delays are in seconds
     Delays = {
-        MissDelay = 6,
+        MissDelay = 5,
         MissileKillDelay = 3,    -- Message TO the shooter, to the target any hits are always instant
         GunKillDelay = 0,        -- Message TO the shooter, to the target any hits are always instant
         MissMessageOnScreen = 5, -- Message TO the shooter
-        DeathMessageOnScreenSeconds = 180
+        DeathMessageOnScreenSeconds = 120
     },
     Messages = {
         --- replaceable variables:
@@ -171,12 +46,13 @@ local Config = {
 
         PlayerMessages = {
             KilledMessage = "{{ callsign }}, You are dead, flow away from the action",
-            MissMessage = "PK Miss",
-            HitMessage = "PK Hit",
+            MissMessage = "{{ callsign }}, PK Miss",
+            HitMessage = "{{ callsign }}, PK Hit",
             CopyShotMessage = "{{ callsign }}, Copy Shot",
             GunKillMessage = "{{ callsign }}, Good guns, splash one",
+            ReviveMessage = "{{ callsign }}, you have been reset and are cleared to enter the action"
         },
-        --- Messages that are sent to the server for LotATC and other tool users.
+        --- Messages that are sent to the server for LotATC, Olympus and other tool users.
         ControllerMessages = {
             UnitKilled = "{{ callsign }}, killed"
             
@@ -227,22 +103,12 @@ local Config = {
 
 --[[
 
-DeadUnits: 
-
-TODO: A-G munitions on dead units. Still fly the pattern. 
-Options. 
-    1. Delete AG weapons immediately
-    2. Delete AG weapons just before impact (tacview debreifable)
-    3. don't delete AG weapons and still have them impact. 
 
 MissileTracker:
 TODO: MadDogged missiles.
 TODO: Destroyed missiles
 
 CrashManager:
-TODO: Helicopter Difference?
-TODO: Gear up parameters fpm
-TODO: Landing on buildings?
 TODO: Over G ? 
 
 BombTracker: 
@@ -264,6 +130,14 @@ end
 
 local Util = {}
 do
+
+    ---@class Vec3
+    ---@field x number North-South on Map
+    ---@field y number Up - Down
+    ---@field z number East- West on Map
+
+    ---@class Array<T>: { [integer]: T }
+
     function Util.split_string(input, separator)
         if separator == nil then
             separator = " "
@@ -278,6 +152,23 @@ do
             table.insert(result, str)
         end
         return result
+    end
+
+    function Util.distance(a, b)
+        return math.sqrt((b.x - a.x) ^ 2 + (b.z - a.z) ^ 2)
+    end
+
+    ---@param str string
+    ---@param findable string
+    ---@param ignoreCase boolean?
+    ---@return boolean
+    function Util.startsWith(str, findable, ignoreCase)
+
+        if ignoreCase == true then
+            return string.lower(str):find('^' .. string.lower(findable)) ~= nil
+        end
+
+        return str:find('^' .. findable) ~= nil
     end
 end
 
@@ -414,6 +305,11 @@ do
         Log.info("Setting unit docile: " .. unit:getName())
 
         local con = unit:getController()
+
+        if isSinglePlayer == true then
+            con = unit:getGroup():getController()
+        end
+
         con:setOption(0, 4) --hold fire
         con:setOption(1, 0) --No reaction to threat
         con:setOption(3, 1) --No radar using
@@ -615,6 +511,8 @@ do
     ---@param value string
     ---@returns string
     function Notifier:Format(template, key, value)
+        if not template or not key or not value then return template end
+
         return template:gsub("{{ " .. key .. " }}", value):gsub("{{" .. key .. "}}", value)
     end
 
@@ -623,7 +521,7 @@ do
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
         net.send_chat_to(friendlyName .. ": " .. "PK Miss", 1)
-        local message = self:Format(Config.Messages.MissMessage, "callsign", friendlyName)
+        local message = self:Format(Config.Messages.PlayerMessages.MissMessage, "callsign", friendlyName)
         trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
     end
 
@@ -647,11 +545,13 @@ do
         end
         local friendlyName = self:NameToCallSign(name)
 
-        local message = self:Format(Config.Messages.KilledMessage, "callsign", friendlyName)
-        net.send_chat_to(friendlyName .. ": " .. Config.Messages.KilledMessage, 1)
+        
+        local controllerMessage = self:Format(Config.Messages.ControllerMessages.KilledMessage, "callsign", friendlyName)
+        net.send_chat_to(controllerMessage, 1)
 
         if target.getID then
-            trigger.action.outTextForUnit(target:getID(), message, Config.Delays.DeathMessageOnScreenSeconds)
+            local message = self:Format(Config.Messages.PlayerMessages.KilledMessage, "callsign", friendlyName)
+            trigger.action.outTextForUnit(target:getID(), message, Config.Delays.DeathMessageOnScreenSeconds, true)
         end
     end
 
@@ -661,7 +561,7 @@ do
         local friendlyName = self:NameToCallSign(name)
         net.send_chat_to(friendlyName .. ": " .. "PK Hit", 1)
 
-        local message = self:Format(Config.Messages.HitMessage, "callsign", friendlyName)
+        local message = self:Format(Config.Messages.PlayerMessages.HitMessage, "callsign", friendlyName)
         trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
     end
 
@@ -681,7 +581,7 @@ do
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
         net.send_chat_to(friendlyName .. ": " .. "Gun kill", 1)
-        local message = self:Format(Config.Messages.GunKillMessage, "callsign", friendlyName)
+        local message = self:Format(Config.Messages.PlayerMessages.GunKillMessage, "callsign", friendlyName)
         trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
     end
 
@@ -704,7 +604,7 @@ do
     function Notifier:CopyShot(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
-        local message = self:Format(Config.Messages.CopyShotMessage, "callsign", friendlyName)
+        local message = self:Format(Config.Messages.PlayerMessages.CopyShotMessage, "callsign", friendlyName)
         trigger.action.outTextForUnit(shooter:getID(), message, 5)
     end
 
@@ -725,6 +625,13 @@ do
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
         trigger.action.outTextForUnit(shooter:getID(), friendlyName .. " " .. "Shot scrapped", 5)
+    end
+    
+    function Notifier:NotifyRevived(unit)
+        local name = unit:getPlayerName() or unit:getCallsign()
+        local friendlyName = self:NameToCallSign(name)
+        local message = self:Format(Config.Messages.PlayerMessages.ReviveMessage, "callsign", friendlyName)
+        trigger.action.outTextForUnit(unit:getID(), message, 10)
     end
 
     ---@param unit table
@@ -781,6 +688,8 @@ do --- UnitManager
         return true
     end
 
+    ---comment
+    ---@return Array<string>
     function UnitManager:getDeadPlayers()
         local result = {}
         for unitName, isDead in pairs(self.dead_players) do
@@ -788,6 +697,7 @@ do --- UnitManager
                 table.insert(result, unitName)
             end
         end
+        return result
     end
 
     ---Registers a hit
@@ -837,12 +747,26 @@ do --- UnitManager
         end
     end
 
-    function UnitManager:markUnitAlive(unit)
+    ---@param unit table
+    ---@param notify boolean
+    function UnitManager:markUnitAlive(unit, notify)
         Log.info("Marking " .. unit:getName() .. " as alive")
         self.dead_units[unit:getName()] = false
         self.bullet_hits[unit:getName()] = 0
         self.missile_hits[unit:getName()] = 0
+
+        if Helpers.isPlayer(unit:getID(), unit:getCoalition()) == true then
+            self.dead_players[unit:getName()] = false
+        end
+
+        self:setInvisible(unit, false)
+
+        if notify == true then
+            self._notifier:NotifyRevived(unit)
+        end
     end
+
+    
 
     ---comment
     ---@param unit table
@@ -850,20 +774,7 @@ do --- UnitManager
         Log.info("Marking " .. unit:getName() .. " as dead")
         self._notifier:NotifyKilled(unit)
 
-        local commmand = {
-            id = 'SetInvisible',
-            params = {
-                value = true
-            }
-        }
-
-        if unit.getController then
-            if isSinglePlayer == true then
-                unit:getGroup():getController():setCommand(commmand)
-            else
-                unit:getController():setCommand(commmand)
-            end
-        end
+        self:setInvisible(unit, true)
 
         local function SendAIRtb(unit)
             AIHelpers.setDocile(unit)
@@ -875,44 +786,220 @@ do --- UnitManager
         self.bullet_hits[unit:getName()] = 0
         self.missile_hits[unit:getName()] = 0
 
-
-        if Helpers.isPlayer(unit:getID(), unit:getCoalition()) == false then
+        if Helpers.isPlayer(unit:getID(), unit:getCoalition()) == true then
+            self.dead_players[unit:getName()] = true
+        else
             SendAIRtb(unit)
         end
     end
 
     function UnitManager:OnUnitBirth(unit)
-        self.dead_units[unit:getName()] = false
-        self.bullet_hits[unit:getName()] = 0
-        self.missile_hits[unit:getName()] = 0
+        self:markUnitAlive(unit, false)
+    end
+
+    ---@private
+    ---@param unit table
+    ---@param isInvisible boolean
+    function UnitManager:setInvisible(unit, isInvisible)
+        local commmand = {
+            id = 'SetInvisible',
+            params = {
+                value = isInvisible
+            }
+        }
+
+        if unit.getController then
+            if isSinglePlayer == true then
+                unit:getGroup():getController():setCommand(commmand)
+            else
+                unit:getController():setCommand(commmand)
+            end
+        end
     end
 
 end
 
-
+---@class RespawnManager
+---@field private _config RespawnManagerConfig
+---@field private _triggerZones Array<TriggerZone>
+---@field private _unitManager UnitManager
 local RespawnManager = {}
 do
-    --[[
-        TODO: Implement
-    ]]
 
-    RespawnManager.OnRefuelingStart = function(unit)
-        
-    end
+    ---@class RespawnManagerConfig
+    ---@field inReviveZone boolean
+    ---@field onTankerConnect boolean
+    ---@field onLanding boolean
 
 
+    ---@class TriggerZone
+    ---@field name string
+    ---@field id string
+    ---@field private type string
+    ---@field private radius number
+    ---@field private verticies Array<Vec3>
+    ---@field private position Vec3
+    local TriggerZone = {}
     do
-        local checkInterval = 5
-        local checkDeadUnits = function(null, time)
+        ---comment
+        ---@param triggerZoneObject table
+        ---@returns TriggerZone
+        function TriggerZone.New(triggerZoneObject)
 
+            TriggerZone.__index = TriggerZone
+            local self = setmetatable({}, TriggerZone)
 
+            self.name = triggerZoneObject["name"]
+            self.id = triggerZoneObject["zoneId"]
 
-            return time + checkInterval
+            self.position = { x = triggerZoneObject["x"], z = triggerZoneObject["y"], y = 0 }
+            self.type = triggerZoneObject["type"]
+            self.radius =  triggerZoneObject["radius"]
+
+            if self.type == 2 then
+                -- load verticies
+
+                local verts = triggerZoneObject["verticies"]
+                if verts and #verts > 0 then
+                    self.verticies = {}
+                    self.verticies[1] = { x = verts[4].x, y = 0, z = verts[4].z }
+                    self.verticies[2] = { x = verts[3].x, y = 0, z = verts[3].z }
+                    self.verticies[3] = { x = verts[2].x, y = 0, z = verts[2].z }
+                    self.verticies[4] = { x = verts[1].x, y = 0, z = verts[1].z }
+                end
+            end
+            return self
         end
 
-        timer.scheduleFunction(checkDeadUnits, {}, timer.getTime() + 5)
+        ---@param pos Vec3
+        ---@returns boolean
+        function TriggerZone:isInZone(pos)
+
+            if self.type == 2 then
+                return self:isInPolygon(pos)
+            end
+
+            return self:isInCilinder(pos)
+        end
+
+        ---@private
+        ---@param point Vec3
+        ---@returns boolean
+        function TriggerZone:isInPolygon(point)
+
+            ---@param polygon Array<Vec3>
+            ---@param x number
+            ---@param z number
+            ---@return boolean
+            local function isInComplexPolygon(polygon, x, z)
+                local function getEdges(poly)
+                    local result = {}
+                    for i = 1, #poly do
+                        local point1 = poly[i]
+                        local point2Index = i + 1
+                        if point2Index > #poly then point2Index = 1 end
+                        local point2 = poly[point2Index]
+                        local edge = { x1 = point1.x, z1 = point1.z, x2 = point2.x, z2 = point2.z }
+                        table.insert(result, edge)
+                    end
+                    return result
+                end
+    
+                local edges = getEdges(polygon)
+                local count = 0;
+                for _, edge in pairs(edges) do
+                    if (x < edge.x1) ~= (x < edge.x2) and z < edge.z1 + ((x - edge.x1) / (edge.x2 - edge.x1)) * (edge.z2 - edge.z1) then
+                        count = count + 1
+                        -- if (yp < y1) != (yp < y2) and xp < x1 + ((yp-y1)/(y2-y1))*(x2-x1) then
+                        --     count = count + 1
+                    end
+                end
+                return count % 2 == 1
+            end
+            return isInComplexPolygon(self.verticies, point.x, point.z)
+        end
+
+        ---@private
+        ---@param point Vec3
+        ---@returns boolean
+        function TriggerZone:isInCilinder(point)
+            if (((point.x - self.position.x) ^ 2 + (point.z - self.position.z) ^ 2) ^ 0.5 <= self.radius) then
+                return true
+            end
+            return false
+        end
     end
 
+    ---@param self RespawnManager
+    local checkZonesTask = function (self, time)
+        self:CheckUnits()
+        return time + 5
+    end
+
+    ---@param respawnManagerConfig RespawnManagerConfig
+    ---@param unitManager UnitManager
+    ---@returns RespawnManager
+    RespawnManager.New = function(respawnManagerConfig, unitManager)
+        RespawnManager.__index = RespawnManager
+        local self = setmetatable({}, RespawnManager)
+        self:LoadZones()
+        self._unitManager = unitManager
+        self._config = respawnManagerConfig
+
+        if self._config.inReviveZone == true then
+            timer.scheduleFunction(checkZonesTask, self, timer.getTime() + 5)
+        end
+
+        return self
+    end
+
+    function RespawnManager:CheckUnits()
+        local players = self._unitManager:getDeadPlayers()
+
+        Log.debug("Dead Units: " .. tostring(#players))
+
+        for _, unitName in pairs(players) do
+            local unit = Unit.getByName(unitName)
+
+            for _, zone in pairs(self._triggerZones) do
+                if zone:isInZone(unit:getPoint()) == true then
+                    self._unitManager:markUnitAlive(unit, true)
+                end
+            end
+        end
+    end
+
+    ---@private
+    function RespawnManager:LoadZones()
+        self._triggerZones = {}
+        for i, trigger_zone in pairs(env.mission.triggers.zones) do
+            local triggerZone = TriggerZone.New(trigger_zone)
+
+            if Util.startsWith(triggerZone.name, "respawnzone_", true) == true then
+                table.insert(self._triggerZones, triggerZone)
+            end
+        end
+    end
+
+    function RespawnManager:OnRefuelingStart(unit)
+        if unit and unit:inAir() == true then
+            if self._config.onTankerConnect == true then
+                self._unitManager:markUnitAlive(unit, true)
+            end
+        end
+    end
+
+    ---@param unit table
+    ---@param base table
+    function RespawnManager:OnUnitLanded(unit, base)
+
+        if base == nil then return end
+        if unit == nil then return end
+
+        if self._config.onLanding == true then
+            self._unitManager:markUnitAlive(unit, true)
+        end
+    end
 end
 
 ---@class InvincibilityManager
@@ -1150,10 +1237,6 @@ do
                         }
                     end
 
-                    --[[
-                        TODO: DEBUG LINE
-                    ]]
-                    trigger.action.outTextForUnit(unit:getID(), vec.y, 1)
                 end
             end
         end
@@ -1220,13 +1303,20 @@ end
 ---@field private _closingSpeeds table<string, table<integer, number>>
 ---@field private _notifier Notifier
 ---@field private _unitManager UnitManager
+---@field private _config WeaponManagementConfig
 local WeaponManager = {}
 do
+
+    ---@class WeaponManagementConfig
+    ---@field deadUnitAAMissileBehaviour integer
+    ---@field deadUnitAGWeaponBehaviour integer
+
     ---comment
     ---@param notifier Notifier
     ---@param unitManager UnitManager
+    ---@param config WeaponManagementConfig
     ---@return WeaponManager
-    function WeaponManager.New(notifier, unitManager)
+    function WeaponManager.New(notifier, unitManager, config)
         WeaponManager.__index = WeaponManager
         local self = setmetatable({}, WeaponManager)
 
@@ -1234,28 +1324,55 @@ do
         self._closingSpeeds = {}
         self._notifier = notifier
         self._unitManager = unitManager
+        self._config = config
 
         return self
     end
 
     function WeaponManager:weaponFired(shooter, weapon)
-        if self._unitManager:isUnitAlive(shooter:getName()) == false then
-            weapon:destroy()
-            self._notifier:DenyShot(shooter)
-        elseif weapon and weapon:getDesc().category == Weapon.Category.MISSILE
-            and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM
-        then
+
+
+        local isShooterDead = self._unitManager:isUnitAlive(shooter:getName()) == false
+
+        if weapon and weapon:getDesc().category == Weapon.Category.MISSILE
+        and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM then
+            
+            -- AA Missiles
+
             if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
-                self._notifier:CopyShotDelayed(shooter, 2)
-                local target = weapon:getTarget() -- can be nil
-                self:startTrackingMissile(shooter, target, weapon)
+                
+                if isShooterDead == false or self._config.deadUnitAAMissileBehaviour == 1 then
+                    self._notifier:CopyShotDelayed(shooter, 2)
+                    local target = weapon:getTarget() -- can be nil
+                    self:startTrackingMissile(shooter, target, weapon)
+                elseif isShooterDead == true and self._config.deadUnitAAMissileBehaviour == 0 then
+                    weapon:destroy()
+                    self._notifier:DenyShot(shooter)
+                end
             end
+
         else
-            Log.debugOutText("weapon fired", 3)
+
+            -- AG WEAPONS
+            if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
+                if isShooterDead == true then
+                    if self._config.deadUnitAGWeaponBehaviour == 1 then
+                        self:startTrackingAgMunitionForDeletion(shooter, weapon)
+                    elseif self._config.deadUnitAGWeaponBehaviour == 2 then
+                        -- do nothing special
+                    else
+                        -- destroy and deny shot
+                        weapon:destroy()
+                        self._notifier:DenyShot(shooter)
+                    end
+                end
+            end
+
         end
     end
 
     ---@class MissileTrackingData
+    ---@field self WeaponManager
     ---@field shooter table
     ---@field missile table
     ---@field shotlocation table
@@ -1265,17 +1382,14 @@ do
     ---@param time unknown
     ---@return nil
     function WeaponManager:trackMissile(data, time)
-        local distance = function(a, b)
-            return math.sqrt((b.x - a.x) ^ 2 + (b.z - a.z) ^ 2)
-        end
-
+        
         local isMissilePastTarget = function(shotLocation, missileLocation, targetLocation)
             local a = shotLocation
             local b = targetLocation
             local c = missileLocation
 
-            local ab = distance(a, b)
-            local ac = distance(a, c)
+            local ab = Util.distance(a, b)
+            local ac = Util.distance(a, c)
 
             if ac - 100 > ab then
                 return true
@@ -1318,7 +1432,7 @@ do
         local shotLocation = data.shotlocation
         local shooter = data.shooter
 
-        if missile:isExist() == false or target:isExist() == false then
+        if missile:isExist() == false or target == nil or target:isExist() == false then
             return nil
         end
 
@@ -1375,20 +1489,69 @@ do
     end
 
     ---@class AgMunitionData
+    ---@field self WeaponManager
     ---@field shooter table
     ---@field weapon table
 
     ---@param data AgMunitionData
-    function WeaponManager:trackAgMunition(data, time)
+    function WeaponManager:trackAgMunitionForDeletion(data, time)
 
-        return time + 1
+        if not data or not data.weapon then return nil end
+        local weapon = data.weapon
+
+        if not weapon then return nil end
+
+        local pos = weapon:getPoint()
+        local ground = land.getHeight({ x = pos.x, y = pos.z })
+        local MpS = weapon:getVelocity().y * 2 -- increase the speed to make sure you don't miss it.
+
+        if MpS > 0 then
+            return time + 3
+        end
+
+        local nextInterval = (pos.y - ground) / math.abs(MpS)
+
+        local deletableByDistance = false
+        if weapon.getTarget and weapon:getTarget() ~= nil then
+            local target = weapon:getTarget()
+            
+            if Util.distance(weapon:getPoint(), target:getPoint()) < 100 then
+                deletableByDistance = true
+            end
+        end
+
+        Log.debugOutTextForUnit(data.shooter:getID(), "agl: " .. pos.y - ground .. " || speed: " .. MpS .. " || nextInterval: " .. nextInterval .. " || " .. tostring(deletableByDistance) , 3)
+
+        if nextInterval < 0.5 or deletableByDistance == true then
+            weapon:destroy()
+            return nil
+        end
+
+        if nextInterval > 5 then
+            nextInterval = 5
+        end
+
+        return time + nextInterval
     end
 
     ---@private
     ---@param shooter table
     ---@param weapon table
-    function WeaponManager:startTrackingAgMunition(shooter, weapon)
+    function WeaponManager:startTrackingAgMunitionForDeletion(shooter, weapon)
 
+
+        ---@type AgMunitionData
+        local data = {
+            self = self,
+            weapon = weapon,
+            shooter = shooter
+        }
+
+        local weaponTrackTask = function(data, time)
+            return self:trackAgMunitionForDeletion(data, time)
+        end
+
+        timer.scheduleFunction(weaponTrackTask, data, timer.getTime() + 0.5)
     end
 end
 
@@ -1397,6 +1560,7 @@ end
 ---@field private _notifier Notifier
 ---@field private _crashManager CrashManager
 ---@field private _weaponsManager WeaponManager
+---@field private _respawnManager RespawnManager
 local EventHandler = {}
 do -- Event Handler
 
@@ -1405,14 +1569,16 @@ do -- Event Handler
     ---@param notifier Notifier
     ---@param crashManager CrashManager
     ---@param weaponManager WeaponManager
+    ---@param respawnManager RespawnManager
     ---@return EventHandler
-    function EventHandler.New(unitManger, notifier, crashManager, weaponManager)
+    function EventHandler.New(unitManger, notifier, crashManager, weaponManager, respawnManager)
         EventHandler.__index = EventHandler
         local self = setmetatable({}, EventHandler)
         self._unitManager = unitManger
         self._notifier = notifier
         self._crashManager = crashManager
         self._weaponsManager = weaponManager
+        self._respawnManager = respawnManager
         return self
     end
 
@@ -1422,8 +1588,6 @@ do -- Event Handler
         if id == nil or id == 0 then
             return
         end 
-
-        Log.debugOutText("event: " .. e.id, 3)
 
         if id == world.event.S_EVENT_SHOOTING_START then
             local shooter = e.initiator
@@ -1450,6 +1614,13 @@ do -- Event Handler
             local unit = e.initiator
 
             self._crashManager:OnGroundTouch(unit)
+        elseif id == world.event.S_EVENT_REFUELING then
+            local unit = e.initiator
+            self._respawnManager:OnRefuelingStart(unit)
+        elseif id == world.event.S_EVENT_LAND then
+            local unit = e.initiator
+            local airbase = e.place
+            self._respawnManager:OnUnitLanded(unit, airbase)
         end
     end
 end
@@ -1462,6 +1633,14 @@ do -- init config
 
     if Config.AutoInvulnerableSettings == nil then
         Config.AutoInvulnerableSettings = {}
+    end
+
+    if Config.DeadUnitWeapons == nil then
+        Config.DeadUnitWeapons = {}
+    end
+
+    if Config.Revive == nil then
+        Config.Revive = {}
     end
 end
 
@@ -1477,13 +1656,28 @@ local invincibilityConfig = {
     autoOutsideZone = Config.AutoInvulnerableSettings.OutsideVulnerableZone or true
 }
 
+---@type WeaponManagementConfig
+local weaponManagerConfig = {
+    deadUnitAAMissileBehaviour = Config.DeadUnitWeapons.AAWeaponsBehaviour or 0,
+    deadUnitAGWeaponBehaviour = Config.DeadUnitWeapons.AGWeaponsBehaviour or 0
+}
+
 local invisibilityManager = InvincibilityManager.New(invincibilityConfig, notifier)
 local unitManager = UnitManager.New(invisibilityManager, notifier)
-local weaponsManager = WeaponManager.New(notifier, unitManager)
+local weaponsManager = WeaponManager.New(notifier, unitManager, weaponManagerConfig)
 
 local crashManager = CrashManager.New(invisibilityManager)
 
-local eventHandler = EventHandler.New(unitManager, notifier, crashManager, weaponsManager)
+---@type RespawnManagerConfig
+local respawnManagerConfig = {
+    onLanding = Config.Revive.Landing or true,
+    onTankerConnect = Config.Revive.TankerConnect or true,
+    inReviveZone = Config.Revive.InRespawnZone or true
+}
+
+local respawnManager = RespawnManager.New(respawnManagerConfig, unitManager)
+
+local eventHandler = EventHandler.New(unitManager, notifier, crashManager, weaponsManager, respawnManager)
 world.addEventHandler(eventHandler)
 
 Log.info("Started")
