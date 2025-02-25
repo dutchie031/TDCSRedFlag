@@ -15,6 +15,9 @@ If indeed you need to have the implementation for the 10% please reach out to ta
 ## __How to use__
 
 Add the script `TDCSRedFlag.lua` to your mission. <br/>
+
+See all versions here: https://github.com/dutchie032/TDCSRedFlag/releases
+
 There is configuration values at the top of the script. Part of them are explained here. <br/>
 Be careful when changing those as the lua table needs to stay in tact. 
 
