@@ -30,11 +30,11 @@ local Config = {
     },
     DeadUnitWeapons = { -- Behaviour of weapons when launched by a dead unit
         AAWeaponsBehaviour = 0, --DEFAULT: 0
-        AGWeaponsBehaviour = 2  --DEFAULT: 0
+        AGWeaponsBehaviour = 0  --DEFAULT: 0
     },
     -- Delays are in seconds
     Delays = {
-        MissDelay = 5,
+        MissDelay = 5,           -- Message TO the shooter, to the target any hits are always instant
         MissileKillDelay = 3,    -- Message TO the shooter, to the target any hits are always instant
         GunKillDelay = 0,        -- Message TO the shooter, to the target any hits are always instant
         MissMessageOnScreen = 5, -- Message TO the shooter
@@ -54,8 +54,9 @@ local Config = {
         },
         --- Messages that are sent to the server for LotATC, Olympus and other tool users.
         ControllerMessages = {
-            UnitKilled = "{{ callsign }}, killed"
-            
+            UnitKilled = "{{ callsign }}, dead", -- callsign of the unit that died
+            MissileMissed = "{{ callsign}} , PK MISS", -- callsign of the unit that missed 
+            UnitKill = "{{ callsign }}, PK HIT" -- callsign of the unit whos missile hit
         }
     },
     -- Amount of registered hits before "death"
@@ -602,6 +603,12 @@ do
 
     ---@param shooter table
     function Notifier:CopyShot(shooter)
+
+        if Config.Messages.PlayerMessages.CopyShotMessage ~= nil then 
+
+
+        end
+
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
         local message = self:Format(Config.Messages.PlayerMessages.CopyShotMessage, "callsign", friendlyName)
@@ -652,6 +659,7 @@ Log.info("Initiating ...")
 ---@class UnitManager
 ---@field private dead_players table<string, boolean>
 ---@field private dead_units table<string, boolean>
+---@field private crashed_units table<string, boolean>
 ---@field private bullet_hits table<string, integer>
 ---@field private missile_hits table<string, integer>
 ---@field private _notifier Notifier
@@ -670,6 +678,7 @@ do --- UnitManager
 
         self.dead_players = {}
         self.dead_units = {}
+        self.crashed_units = {}
         self.bullet_hits = {}
         self.missile_hits = {}
         self.invincibilityManager = invincibilityManager
@@ -734,12 +743,17 @@ do --- UnitManager
                 end
             end
         elseif Object.getCategory(weapon) == Object.Category.UNIT then
-
-
             local targetName = "nil"
             if target.getName then
                 targetName = target:getName()
             end
+
+            local unitName = weapon:getName()
+            if self.crashed_units[unitName] == true then -- only crash and explode unit once
+                return
+            end
+
+            self.crashed_units[unitName] = true
 
             self.invincibilityManager:setMortal(weapon)
             trigger.action.explosion(weapon:getPoint(), 30)
@@ -754,6 +768,7 @@ do --- UnitManager
         self.dead_units[unit:getName()] = false
         self.bullet_hits[unit:getName()] = 0
         self.missile_hits[unit:getName()] = 0
+        self.crashed_units[unit:getName()] = false
 
         if Helpers.isPlayer(unit:getID(), unit:getCoalition()) == true then
             self.dead_players[unit:getName()] = false
