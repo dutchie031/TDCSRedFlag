@@ -1,3 +1,6 @@
+--- VERSION 0.1.2
+
+
 --=========================================
 
 -- BIG NOTE!!!
@@ -44,19 +47,23 @@ local Config = {
         --- replaceable variables:
         --- {{ callsign }} => replaces with the callsign (delimited first part)
 
+        --- If you want to disable a message, simply replace the string with nil 
+        --- example: 
+        ---  UnitKilled = nil
         PlayerMessages = {
-            KilledMessage = "{{ callsign }}, You are dead, flow away from the action",
-            MissMessage = "{{ callsign }}, PK Miss",
-            HitMessage = "{{ callsign }}, PK Hit",
+            UnitKilled = "{{ callsign }}, You are dead, flow away from the action",
+            MissileMissed = "{{ callsign }}, PK Miss",
+            ConfirmKill = "{{ callsign }}, PK Hit",
+            ConfirmKillGunKill = "{{ callsign }}, good guns, splash one",
             CopyShotMessage = "{{ callsign }}, Copy Shot",
-            GunKillMessage = "{{ callsign }}, Good guns, splash one",
             ReviveMessage = "{{ callsign }}, you have been reset and are cleared to enter the action"
         },
         --- Messages that are sent to the server for LotATC, Olympus and other tool users.
         ControllerMessages = {
             UnitKilled = "{{ callsign }}, dead", -- callsign of the unit that died
             MissileMissed = "{{ callsign}} , PK MISS", -- callsign of the unit that missed 
-            UnitKill = "{{ callsign }}, PK HIT" -- callsign of the unit whos missile hit
+            ConfirmKill = "{{ callsign }}, PK HIT", -- callsign of the unit whos missile hit
+            ConfirmKillGunKill = "{{ callsign }}, GUN KILL" -- callsign of the shooter
         }
     },
     -- Amount of registered hits before "death"
@@ -131,13 +138,6 @@ end
 
 local Util = {}
 do
-
-    ---@class Vec3
-    ---@field x number North-South on Map
-    ---@field y number Up - Down
-    ---@field z number East- West on Map
-
-    ---@class Array<T>: { [integer]: T }
 
     function Util.split_string(input, separator)
         if separator == nil then
@@ -521,9 +521,17 @@ do
     function Notifier:NotifyMissed(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. "PK Miss", 1)
-        local message = self:Format(Config.Messages.PlayerMessages.MissMessage, "callsign", friendlyName)
-        trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
+
+        if Config.Messages.ControllerMessages.MissileMissed ~= nil then
+            local message = self:Format(Config.Messages.ControllerMessages.MissileMissed, "callsign", friendlyName)
+            net.send_chat_to(message, 1)
+        end
+
+        if Config.Messages.PlayerMessages.MissileMissed ~= nil then
+            local message = self:Format(Config.Messages.PlayerMessages.MissileMissed, "callsign", friendlyName)
+            trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
+        end
+
     end
 
     ---@param shooter table
@@ -546,12 +554,13 @@ do
         end
         local friendlyName = self:NameToCallSign(name)
 
-        
-        local controllerMessage = self:Format(Config.Messages.ControllerMessages.KilledMessage, "callsign", friendlyName)
-        net.send_chat_to(controllerMessage, 1)
+        if Config.Messages.ControllerMessages.UnitKilled ~= nil then
+            local controllerMessage = self:Format(Config.Messages.ControllerMessages.UnitKilled, "callsign", friendlyName)
+            net.send_chat_to(controllerMessage, 1)
+        end
 
-        if target.getID then
-            local message = self:Format(Config.Messages.PlayerMessages.KilledMessage, "callsign", friendlyName)
+        if target.getID and Config.Messages.PlayerMessages.UnitKilled ~= nil then
+            local message = self:Format(Config.Messages.PlayerMessages.UnitKilled, "callsign", friendlyName)
             trigger.action.outTextForUnit(target:getID(), message, Config.Delays.DeathMessageOnScreenSeconds, true)
         end
     end
@@ -560,30 +569,49 @@ do
     function Notifier:NotifyKill(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. "PK Hit", 1)
 
-        local message = self:Format(Config.Messages.PlayerMessages.HitMessage, "callsign", friendlyName)
-        trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
+        if Config.Messages.ControllerMessages.ConfirmKill ~= nil then
+            local message = self:Format(Config.Messages.ControllerMessages.ConfirmKill, "callsign", friendlyName)
+            net.send_chat_to(message, 1)
+        end
+        
+        if Config.Messages.PlayerMessages.ConfirmKill ~= nil then
+            local message = self:Format(Config.Messages.PlayerMessages.ConfirmKill, "callsign", friendlyName)
+            trigger.action.outTextForUnit(shooter:getID(), message, 5)
+        end
     end
 
     ---@param shooter table
     ---@param delaySeconds number
     function Notifier:NotifyKillDelayed(shooter, delaySeconds)
-        local notify = function(input, time)
-            input.notifier:NotifyKill(input.shooter)
-            return nil
-        end
 
-        timer.scheduleFunction(notify, { notifier = self, shooter = shooter } , timer.getTime() + delaySeconds)
+        if delaySeconds <= 1 then
+            self:NotifyKill(shooter)
+        else
+            local notify = function(input, time)
+                input.notifier:NotifyKill(input.shooter)
+                return nil
+            end
+    
+            timer.scheduleFunction(notify, { notifier = self, shooter = shooter } , timer.getTime() + delaySeconds)
+        end
     end
 
     ---@param shooter table
     function Notifier:NotifyGunKill(shooter)
         local name = shooter:getPlayerName() or shooter:getCallsign()
         local friendlyName = self:NameToCallSign(name)
-        net.send_chat_to(friendlyName .. ": " .. "Gun kill", 1)
-        local message = self:Format(Config.Messages.PlayerMessages.GunKillMessage, "callsign", friendlyName)
-        trigger.action.outTextForUnit(shooter:getID(), message, Config.Delays.MissMessageOnScreen)
+
+        if Config.Messages.ControllerMessages.ConfirmKill ~= nil then
+            local message = self:Format(Config.Messages.ControllerMessages.ConfirmKillGunKill, "callsign", friendlyName)
+            net.send_chat_to(message, 1)
+        end
+
+        if Config.Messages.PlayerMessages.ConfirmKill ~= nil then
+            local message = self:Format(Config.Messages.PlayerMessages.ConfirmKillGunKill, "callsign", friendlyName)
+            trigger.action.outTextForUnit(shooter:getID(), message, 5)
+        end
+
     end
 
     ---@param shooter table
@@ -975,10 +1003,11 @@ do
 
         for _, unitName in pairs(players) do
             local unit = Unit.getByName(unitName)
-
-            for _, zone in pairs(self._triggerZones) do
-                if zone:isInZone(unit:getPoint()) == true then
-                    self._unitManager:markUnitAlive(unit, true)
+            if unit then
+                for _, zone in pairs(self._triggerZones) do
+                    if zone:isInZone(unit:getPoint()) == true then
+                        self._unitManager:markUnitAlive(unit, true)
+                    end
                 end
             end
         end
