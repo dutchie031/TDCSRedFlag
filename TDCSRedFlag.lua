@@ -1,5 +1,4 @@
---- VERSION 0.1.2
-
+local version  = "0.1.6"
 
 --=========================================
 
@@ -61,7 +60,7 @@ local Config = {
         --- Messages that are sent to the server for LotATC, Olympus and other tool users.
         ControllerMessages = {
             UnitKilled = "{{ callsign }}, dead", -- callsign of the unit that died
-            MissileMissed = "{{ callsign}} , PK MISS", -- callsign of the unit that missed 
+            MissileMissed = "{{ callsign }} , PK MISS", -- callsign of the unit that missed 
             ConfirmKill = "{{ callsign }}, PK HIT", -- callsign of the unit whos missile hit
             ConfirmKillGunKill = "{{ callsign }}, GUN KILL" -- callsign of the shooter
         }
@@ -102,7 +101,8 @@ local Config = {
         GroundCollisionDetection = true,
         ObjectCollisionDetection = true
     },
-    DebugLog = true
+    DebugLog = true,
+    DebugOutText = true,
 }
 
 --============================================
@@ -159,6 +159,18 @@ do
         return math.sqrt((b.x - a.x) ^ 2 + (b.z - a.z) ^ 2)
     end
 
+    ---comment
+    ---@param a Vec3
+    ---@param b Vec3
+    ---@return number
+    function Util.getDistance3D(a, b)
+        return Util.vectorMagnitude({ x = a.x - b.x, y = a.y - b.y, z = a.z - b.z })
+    end
+
+    function Util.vectorMagnitude(vec)
+        return (vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2) ^ 0.5
+    end
+
     ---@param str string
     ---@param findable string
     ---@param ignoreCase boolean?
@@ -171,6 +183,7 @@ do
 
         return str:find('^' .. findable) ~= nil
     end
+
 end
 
 local Log = {}
@@ -195,13 +208,13 @@ do
     end 
 
     Log.debugOutText = function(string, time)
-        if Config.DebugLog == true then
+        if Config.DebugOutText == true then
             trigger.action.outText(string, time)
         end
     end
 
     Log.debugOutTextForUnit = function(unitId, string, time)
-        if Config.DebugLog == true then
+        if Config.DebugOutText == true then
             trigger.action.outTextForUnit(unitId, string, time)
         end
     end
@@ -247,16 +260,20 @@ do
         end
     end
 
-    Helpers.vecToMs = function(vec)
-        return (vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2) ^ 0.5
-    end
 
     Helpers.vecSub = function(vec1, vec2)
         return { x = vec1.x - vec2.x, y = vec1.y - vec2.y, z = vec1.z - vec2.z }
     end
 
+    ---comment
+    ---@param a Vec3
+    ---@param b Vec3
+    Helpers.vecAdd = function (a, b)
+        return {x=a.x+b.x, y=a.y+b.y, z=a.z+b.z}
+    end
+
     Helpers.normVec = function(vec)
-        local magnitude = Helpers.vecToMs(vec)
+        local magnitude = Util.vectorMagnitude(vec)
 
         return {
             x = vec.x / magnitude,
@@ -524,7 +541,7 @@ do
 
         if Config.Messages.ControllerMessages.MissileMissed ~= nil then
             local message = self:Format(Config.Messages.ControllerMessages.MissileMissed, "callsign", friendlyName)
-            net.send_chat_to(message, 1)
+            net.send_chat(message, false)
         end
 
         if Config.Messages.PlayerMessages.MissileMissed ~= nil then
@@ -556,7 +573,7 @@ do
 
         if Config.Messages.ControllerMessages.UnitKilled ~= nil then
             local controllerMessage = self:Format(Config.Messages.ControllerMessages.UnitKilled, "callsign", friendlyName)
-            net.send_chat_to(controllerMessage, 1)
+            net.send_chat(controllerMessage, false)            
         end
 
         if target.getID and Config.Messages.PlayerMessages.UnitKilled ~= nil then
@@ -571,6 +588,7 @@ do
         local friendlyName = self:NameToCallSign(name)
 
         if Config.Messages.ControllerMessages.ConfirmKill ~= nil then
+            
             local message = self:Format(Config.Messages.ControllerMessages.ConfirmKill, "callsign", friendlyName)
             net.send_chat_to(message, 1)
         end
@@ -631,16 +649,12 @@ do
 
     ---@param shooter table
     function Notifier:CopyShot(shooter)
-
         if Config.Messages.PlayerMessages.CopyShotMessage ~= nil then 
-
-
+            local name = shooter:getPlayerName() or shooter:getCallsign()
+            local friendlyName = self:NameToCallSign(name)
+            local message = self:Format(Config.Messages.PlayerMessages.CopyShotMessage, "callsign", friendlyName)
+            trigger.action.outTextForUnit(shooter:getID(), message, 5)
         end
-
-        local name = shooter:getPlayerName() or shooter:getCallsign()
-        local friendlyName = self:NameToCallSign(name)
-        local message = self:Format(Config.Messages.PlayerMessages.CopyShotMessage, "callsign", friendlyName)
-        trigger.action.outTextForUnit(shooter:getID(), message, 5)
     end
 
     ---@param shooter table
@@ -663,6 +677,11 @@ do
     end
     
     function Notifier:NotifyRevived(unit)
+
+        if Config.Messages.PlayerMessages.ReviveMessage == nil then
+            return
+        end
+
         local name = unit:getPlayerName() or unit:getCallsign()
         local friendlyName = self:NameToCallSign(name)
         local message = self:Format(Config.Messages.PlayerMessages.ReviveMessage, "callsign", friendlyName)
@@ -738,11 +757,12 @@ do --- UnitManager
     end
 
     ---Registers a hit
-    ---@param target table
-    ---@param shooter table
-    ---@param weapon table
+    ---@param target Unit
+    ---@param shooter Unit
+    ---@param weapon Weapon
     function UnitManager:registerHit(target, shooter, weapon)
         if Object.getCategory(weapon) == Object.Category.WEAPON then
+
             if weapon:getDesc().category == Weapon.Category.SHELL then
                 if self:isUnitAlive(shooter:getName()) == false then
                     return --if hit by a bullet from a dead unit the hit does not count
@@ -809,8 +829,6 @@ do --- UnitManager
         end
     end
 
-    
-
     ---comment
     ---@param unit table
     function UnitManager:markUnitDead(unit)
@@ -836,8 +854,13 @@ do --- UnitManager
         end
     end
 
+    ---comment
+    ---@param unit Unit
     function UnitManager:OnUnitBirth(unit)
         self:markUnitAlive(unit, false)
+        self.invincibilityManager:resetUnit(unit)
+
+        trigger.action.outTextForUnit(unit:getID(), "Reset unit...", 1, true)
     end
 
     ---@private
@@ -875,7 +898,7 @@ do
     ---@field onLanding boolean
 
 
-    ---@class TriggerZone
+    ---@class RedFlagTriggerZone
     ---@field name string
     ---@field id string
     ---@field private type string
@@ -1064,7 +1087,7 @@ do -- InvincibilityManager
             for _, group in ipairs(groups) do
                 if group and group:isExist() then
                     for _, unit in ipairs(group:getUnits()) do
-                        if unit then
+                            if unit then
                             self:CheckUnit(unit)
                         end
                     end
@@ -1113,6 +1136,7 @@ do -- InvincibilityManager
 
     function InvincibilityManager:resetUnit(unit)
         self._forcedUnits[unit:getName()] = nil
+        self._invincibleUnits[unit:getName()] = false
     end
 
     function InvincibilityManager:resetUnitDelayed(unit, delaySeconds)
@@ -1316,7 +1340,6 @@ do
                     last = fpmData[#fpmData-1]
                 end
 
-                trigger.action.outText("last fpms: " .. last.MperS, 10) --[[ TODO: DEBUG ]]--
                 if last.MperS < -15 then --- 15m/s is about 3000fpm
                     trigger.action.explosion(unit:getPoint(), 1000)
                 end
@@ -1343,6 +1366,7 @@ end
 
 
 ---@class WeaponManager
+---@field private _deletedWeapons Array<Weapon>
 ---@field private _missileSpeeds table<string, number>
 ---@field private _closingSpeeds table<string, table<integer, number>>
 ---@field private _notifier Notifier
@@ -1370,11 +1394,27 @@ do
         self._unitManager = unitManager
         self._config = config
 
+        self._deletedWeapons = {}
+
         return self
     end
 
-    function WeaponManager:weaponFired(shooter, weapon)
+    local function destroyWeaponForSure(weapon, time)
+        if weapon and weapon:isExist() then
+            local pos = weapon:getPoint()
+            trigger.action.explosion(pos, 30)
+        end
+        
+        return nil
+    end
 
+    function WeaponManager.ExplodeWeapon(weapon)
+        local pos = weapon:getPoint()
+        trigger.action.explosion(pos, 5)
+        timer.scheduleFunction(destroyWeaponForSure, weapon, timer.getTime() + 2)
+    end
+
+    function WeaponManager:weaponFired(shooter, weapon)
 
         local isShooterDead = self._unitManager:isUnitAlive(shooter:getName()) == false
 
@@ -1382,19 +1422,17 @@ do
         and weapon:getDesc().missileCategory == Weapon.MissileCategory.AAM then
             
             -- AA Missiles
-
-            if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) == true then
+            if isShooterDead == false or self._config.deadUnitAAMissileBehaviour == 1 then
+                self._notifier:CopyShotDelayed(shooter, 2)
+                local target = weapon:getTarget() -- can be nil
+                self:startTrackingMissile(shooter, target, weapon)
+            elseif isShooterDead == true then
                 
-                if isShooterDead == false or self._config.deadUnitAAMissileBehaviour == 1 then
-                    self._notifier:CopyShotDelayed(shooter, 2)
-                    local target = weapon:getTarget() -- can be nil
-                    self:startTrackingMissile(shooter, target, weapon)
-                elseif isShooterDead == true and self._config.deadUnitAAMissileBehaviour == 0 then
-                    weapon:destroy()
-                    self._notifier:DenyShot(shooter)
-                end
-            end
+                self.ExplodeWeapon(weapon)
+                self._deletedWeapons[weapon:getName()] = weapon
 
+                self._notifier:DenyShot(shooter)
+            end
         else
 
             -- AG WEAPONS
@@ -1417,102 +1455,87 @@ do
 
     ---@class MissileTrackingData
     ---@field self WeaponManager
-    ---@field shooter table
-    ---@field missile table
-    ---@field shotlocation table
-    ---@field target table
-    
+    ---@field shooter Unit
+    ---@field missile Weapon
+    ---@field shotlocation Vec3
+    ---@field target Unit
+    ---@field shotTime number
+    ---@field lastValidTargetTime number
+    ---@field lastPositiveClosure number
+    ---@field checkIncrement integer
+
+    ---@param missile Weapon
+    ---@param target Unit
+    local getClosingSpeed = function(missile, target)
+        
+        local relative =  Helpers.vecSub(missile:getVelocity(), target:getVelocity())
+        local missileAlign = Helpers.vecAlignment(relative, missile:getVelocity())
+
+        if missileAlign > 0 then
+            return Util.vectorMagnitude(relative)
+        end
+        
+        return 0 - Util.vectorMagnitude(relative)
+    end
+
     ---@param data MissileTrackingData
     ---@param time unknown
-    ---@return nil
+    ---@return number?
     function WeaponManager:trackMissile(data, time)
-        
-        local isMissilePastTarget = function(shotLocation, missileLocation, targetLocation)
-            local a = shotLocation
-            local b = targetLocation
-            local c = missileLocation
 
-            local ab = Util.distance(a, b)
-            local ac = Util.distance(a, c)
-
-            if ac - 100 > ab then
-                return true
-            end
-
-            return false
-        end
-
-        local isDecelerating = function(missile)
-            local id = tostring(Object.getName(missile))
-
-            local velocityVec = missile:getVelocity()
-            local currentSpeed = Helpers.vecToMs(velocityVec)
-
-            if not self._missileSpeeds[id] then
-                self._missileSpeeds[id] = currentSpeed
-            end
-
-            local lastSpeed =self._missileSpeeds[id]
-            local isSlowing = lastSpeed > currentSpeed
-
-            return isSlowing, currentSpeed
-        end
-
-
-        local closingSpeed = function(missile, target)
-            local relativeVector = Helpers.vecSub(missile:getVelocity(), target:getVelocity())
-
-            local isCold = Helpers.vecAlignment(relativeVector, target:getVelocity()) > 0
-
-            if isCold == false then
-                return 0 - Helpers.vecToMs(relativeVector)
-            else
-                return Helpers.vecToMs(relativeVector)
-            end
-        end
-
-        local target = data.target
+        data.checkIncrement = data.checkIncrement + 1
         local missile = data.missile
-        local shotLocation = data.shotlocation
-        local shooter = data.shooter
 
-        if missile:isExist() == false or target == nil or target:isExist() == false then
+        if missile == nil or missile:isExist() ~= true then
+            self._notifier:NotifyMissedDelayed(data.shooter, 0)
             return nil
         end
 
-        if isMissilePastTarget(shotLocation, missile:getPoint(), target:getPoint()) == true then
-            self._notifier:NotifyMissedDelayed(shooter, Config.Delays.MissDelay or 5)
+        local target = missile:getTarget()
+
+        -- if after 20 seconds a missile does not have a target it's not likely to hit anything. 
+        -- not likely enough for a red flag scenario anyway
+        if target == nil and timer.getTime() - data.lastValidTargetTime > 10 then
+            self._notifier:NotifyMissed(data.shooter)
             return nil
         end
 
-        local decelling, speed = isDecelerating(missile)
-        if decelling == true and speed < 600 then
-            local n = closingSpeed(missile, target)
-            self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] + 1] = n
-            if #self._closingSpeeds[Object.getName(missile)] >= 3 then
-                local nMin1 = self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] - 1]
-                local nMin2 = self._closingSpeeds[Object.getName(missile)][#self._closingSpeeds[Object.getName(missile)] - 2]
-
-                Log.debug("Checking closing speeds " .. n .. " " .. nMin1 .. " " .. nMin2)
-
-                if nMin2 < 0 and nMin1 < 0 and n < 0 and nMin2 > nMin1 and nMin1 > n then
-                    -- when closing speed is negative and decreasing for 3 checks in a row the missile is trashed
-
-                    --delete missile
-                    missile:destroy()
-                    self._notifier:NotifyMissedDelayed(shooter, Config.Delays.MissDelay or 5)
-                    return nil
-                end
-            end
+        target = data.target
+        if target == nil or target:isExist() == false then
+            return time + 0.5
         end
 
-        return time + 2
+        data.lastValidTargetTime = timer.getTime()
+        local closingSpeed = getClosingSpeed(missile, target --[[@as Unit]])
+
+        if closingSpeed > 0 then
+            data.lastPositiveClosure = timer.getTime()
+        elseif timer.getTime() - data.lastPositiveClosure > 5 then
+            self._notifier:NotifyMissedDelayed(data.shooter, 3)
+            return nil
+        end
+
+        local distance = Util.getDistance3D(missile:getPoint(), target:getPoint())
+        local tot = distance / closingSpeed
+
+        Log.debugOutText("closure: " .. tostring(closingSpeed) .. "tot: " .. tostring(tot), 5)
+        local checkInterval = distance / (closingSpeed * 2)
+
+        if tot < 0.20 and closingSpeed > 20 then
+            self._unitManager:registerHit(target --[[@as Unit]], data.shooter, missile)
+            return nil
+        end
+
+        checkInterval = math.abs(checkInterval)
+        if checkInterval > 5 then checkInterval = 5 end
+        if data.checkIncrement < 10 then checkInterval = 0.3 end
+        return time + checkInterval
     end
 
     ---@private
-    ---@param shooter any
-    ---@param target any
-    ---@param missile any
+    ---@param shooter Unit
+    ---@param target Unit
+    ---@param missile Weapon
     function WeaponManager:startTrackingMissile(shooter, target, missile)
         ---@type MissileTrackingData
         local data = {
@@ -1521,7 +1544,10 @@ do
             missile = missile,
             shotlocation = shooter:getPoint(),
             shooter = shooter,
-            shotTime = timer.getTime()
+            shotTime = timer.getTime(),
+            lastValidTargetTime = timer.getTime(),
+            lastPositiveClosure = timer.getTime(),
+            checkIncrement = 0
         }
 
         local missileTask = function(passedData, time)
@@ -1529,8 +1555,9 @@ do
         end
 
         self._closingSpeeds[Object.getName(missile)] = {} 
-        timer.scheduleFunction(missileTask, data, timer.getTime() + 2)
+        timer.scheduleFunction(missileTask, data, timer.getTime() + 0.3)
     end
+    
 
     ---@class AgMunitionData
     ---@field self WeaponManager
@@ -1583,7 +1610,6 @@ do
     ---@param weapon table
     function WeaponManager:startTrackingAgMunitionForDeletion(shooter, weapon)
 
-
         ---@type AgMunitionData
         local data = {
             self = self,
@@ -1633,6 +1659,8 @@ do -- Event Handler
             return
         end 
 
+        Log.debug("Receiving event: " .. tostring(id))
+
         if id == world.event.S_EVENT_SHOOTING_START then
             local shooter = e.initiator
             if self._unitManager:isUnitAlive(shooter:getName()) == false then
@@ -1646,6 +1674,7 @@ do -- Event Handler
             local shooter = e.initiator
             local target = e.target
             local weapon = e.weapon
+            Log.debug("unit got hit: " .. target:getName())
             self._unitManager:registerHit(target, shooter, weapon)
         elseif id == world.event.S_EVENT_BIRTH then
             local unit = e.initiator
@@ -1724,4 +1753,5 @@ local respawnManager = RespawnManager.New(respawnManagerConfig, unitManager)
 local eventHandler = EventHandler.New(unitManager, notifier, crashManager, weaponsManager, respawnManager)
 world.addEventHandler(eventHandler)
 
+Log.info("Version: " .. version)
 Log.info("Started")
