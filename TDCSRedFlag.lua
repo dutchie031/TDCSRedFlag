@@ -50,24 +50,24 @@ local Config = {
         --- example: 
         ---  UnitKilled = nil
         PlayerMessages = {
-            UnitKilled = "{{ callsign }}, You are dead, flow away from the action and follow Dead Man Ops",
-            MissileMissed = nil,
-            ConfirmKill = nil,
+            UnitKilled = "{{ callsign }}, You are dead, flow away from the action",
+            MissileMissed = "{{ callsign }}, PK Miss",
+            ConfirmKill = "{{ callsign }}, PK Hit",
             ConfirmKillGunKill = "{{ callsign }}, good guns, splash one",
-            CopyShotMessage = nil,
-            ReviveMessage = nil
+            CopyShotMessage = "{{ callsign }}, Copy Shot",
+            ReviveMessage = "{{ callsign }}, you have been reset and are cleared to enter the action"
         },
         --- Messages that are sent to the server for LotATC, Olympus and other tool users.
         ControllerMessages = {
             UnitKilled = "{{ callsign }}, dead", -- callsign of the unit that died
-            MissileMissed = "{{ callsign }}, PK MISS", -- callsign of the unit that missed 
+            MissileMissed = "{{ callsign }} , PK MISS", -- callsign of the unit that missed 
             ConfirmKill = "{{ callsign }}, PK HIT", -- callsign of the unit whos missile hit
             ConfirmKillGunKill = "{{ callsign }}, GUN KILL" -- callsign of the shooter
         }
     },
     -- Amount of registered hits before "death"
     KillParameters = {
-        Bullets = 5,
+        Bullets = 8,
         Missiles = 1,
 
         ---If you want the Gun solution checker to ONLY work when the shooter is behind the target
@@ -104,8 +104,8 @@ local Config = {
         GroundCollisionDetection = true,
         ObjectCollisionDetection = true
     },
-    DebugLog = true,
-    DebugOutText = true,
+    DebugLog = false,
+    DebugOutText = false,
 }
 
 --============================================
