@@ -68,7 +68,10 @@ local Config = {
     -- Amount of registered hits before "death"
     KillParameters = {
         Bullets = 8,
-        Missiles = 1
+        Missiles = 1,
+
+        ---If you want the Gun solution checker to ONLY work when the shooter is behind the target
+        GunKillOnlyRearAspect = true
     },
     -- REVIVE NOT IMPLEMENTED YET
     Revive = {
@@ -101,8 +104,8 @@ local Config = {
         GroundCollisionDetection = true,
         ObjectCollisionDetection = true
     },
-    DebugLog = true,
-    DebugOutText = true,
+    DebugLog = false,
+    DebugOutText = false,
 }
 
 --============================================
@@ -184,6 +187,12 @@ do
         return str:find('^' .. findable) ~= nil
     end
 
+    ---@param number number
+    ---@return string
+    function Util.roundNumber(number)
+        return string.format("%.2f", number)
+    end
+
 end
 
 local Log = {}
@@ -209,7 +218,7 @@ do
 
     Log.debugOutText = function(string, time)
         if Config.DebugOutText == true then
-            trigger.action.outText(string, time)
+            trigger.action.outText("[DEBUG] " .. string, time)
         end
     end
 
@@ -280,6 +289,106 @@ do
             y = vec.y / magnitude,
             z = vec.z / magnitude
         }
+    end
+
+    ---@param posA Vec3 Bullet
+    ---@param speedA Vec3 Bullet
+    ---@param posB Vec3 Jet
+    ---@param speedB Vec3 Jet
+    ---@param acc Vec3 JetAcceleration
+    ---@return boolean
+    Helpers.vecCollision = function(posA, speedA, posB, speedB, acc)
+        
+        ---@param bulletX number bullet position
+        ---@param jetX number jet position
+        ---@param bulletV number
+        ---@param jetV number
+        ---@param jetA number
+        ---@return number, number
+        local dimensionCollision = function(bulletX, jetX, bulletV, jetV, jetA)
+            
+            local closestToZero = function(a, b)
+
+                if a == b then
+                    if a > 0 then return a end
+                    return b
+                end
+                if math.abs(a) < math.abs(b) then return a end
+                if math.abs(b) < math.abs(a) then return b end
+                return 0
+            end
+            
+            local SolveAccelerated = function(a, b, c, d, e)
+
+                -- local a = bulletX
+                -- local b = bulletV
+                -- local c = jetX
+                -- local d = jetV
+                -- local e = jetA
+                local underRoot = math.pow((2 * d -2 * b),2) - 4 * e * (2 * c - 2 * a)
+
+                local first = (-2 * d + 2 * b + math.sqrt(underRoot)) / (2 * e)
+                local second = (-2 * d + 2 * b - math.sqrt(underRoot)) / (2 * e)
+
+                -- The most logical solution is the one that lies closest to 0 (as it's all short ranges and t should be very low)
+                return closestToZero(first, second)
+            end
+
+            local minx1 = bulletX - 0.5
+            local maxx1 = bulletX + 0.5
+
+            local minx2 = jetX - 20
+            local maxx2 = jetX + 20
+
+            if jetA == 0 then
+                Log.debugOutText("Solving linear",1)
+                local xA = (maxx2 - minx1) / (bulletV - jetV)
+                local xB = (minx2 - maxx1) / (bulletV - jetV)
+
+                local minTime = math.min(xA, xB)
+                local maxTime = math.max(xA, xB)
+
+                return minTime, maxTime
+            end
+
+            local xA = SolveAccelerated(minx1, bulletV, maxx2, jetV, jetA)
+            local xB = SolveAccelerated(maxx1, bulletV, minx2,  jetV, jetA)
+            
+            local minTime = math.min(xA, xB)
+            local maxTime = math.max(xA, xB)
+            return minTime, maxTime
+
+        end
+
+        local xTimeMin, xTimeMax = dimensionCollision(posA.x, posB.x, speedA.x, speedB.x, acc.x)
+        local yTimeMin, yTimeMax = dimensionCollision(posA.y, posB.y, speedA.y, speedB.y, acc.y)
+        local zTimeMin, zTimeMax = dimensionCollision(posA.z, posB.z, speedA.z, speedB.z, acc.z)
+
+        Log.debugOutText("[" .. Util.roundNumber(xTimeMin) .. ",".. Util.roundNumber(xTimeMax) .. "]" ..
+                "[" .. Util.roundNumber(yTimeMin) .. ",".. Util.roundNumber(yTimeMax) .. "]" ..
+            "[" .. Util.roundNumber(zTimeMin) .. ",".. Util.roundNumber(zTimeMax) .. "]", 1)
+
+        return
+            (xTimeMin <= yTimeMax and yTimeMin <= xTimeMax)
+            and (yTimeMin <= zTimeMax and zTimeMin <= yTimeMax)
+            and (xTimeMin <= zTimeMax and zTimeMin <= yTimeMax)
+    end
+
+    ---@param vec Vec3
+    ---@param magnitude number
+    ---@return Vec3
+    Helpers.vecSetMagnitude = function(vec, magnitude)
+        local oldMag = Helpers.vectorMagnitude(vec)
+
+        return {
+            x = vec.x / oldMag * magnitude,
+            y = vec.y / oldMag * magnitude,
+            z = vec.z / oldMag * magnitude,
+        }
+    end
+
+    Helpers.vectorMagnitude = function(vec)
+        return (vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2) ^ 0.5
     end
 
     ---returns a number in range [-1,1]. > 0 same direction. < 0 opposite direction
@@ -541,7 +650,7 @@ do
 
         if Config.Messages.ControllerMessages.MissileMissed ~= nil then
             local message = self:Format(Config.Messages.ControllerMessages.MissileMissed, "callsign", friendlyName)
-            net.send_chat(message, false)
+            net.send_chat(message, true)
         end
 
         if Config.Messages.PlayerMessages.MissileMissed ~= nil then
@@ -573,7 +682,7 @@ do
 
         if Config.Messages.ControllerMessages.UnitKilled ~= nil then
             local controllerMessage = self:Format(Config.Messages.ControllerMessages.UnitKilled, "callsign", friendlyName)
-            net.send_chat(controllerMessage, false)            
+            net.send_chat(controllerMessage, true)            
         end
 
         if target.getID and Config.Messages.PlayerMessages.UnitKilled ~= nil then
@@ -590,7 +699,7 @@ do
         if Config.Messages.ControllerMessages.ConfirmKill ~= nil then
             
             local message = self:Format(Config.Messages.ControllerMessages.ConfirmKill, "callsign", friendlyName)
-            net.send_chat_to(message, 1)
+            net.send_chat(message, true)
         end
         
         if Config.Messages.PlayerMessages.ConfirmKill ~= nil then
@@ -622,12 +731,12 @@ do
 
         if Config.Messages.ControllerMessages.ConfirmKill ~= nil then
             local message = self:Format(Config.Messages.ControllerMessages.ConfirmKillGunKill, "callsign", friendlyName)
-            net.send_chat_to(message, 1)
+            net.send_chat(message, true)
         end
 
         if Config.Messages.PlayerMessages.ConfirmKill ~= nil then
             local message = self:Format(Config.Messages.PlayerMessages.ConfirmKillGunKill, "callsign", friendlyName)
-            trigger.action.outTextForUnit(shooter:getID(), message, 5)
+            trigger.action.outTextForUnit(shooter:getID(), message, 8)
         end
 
     end
@@ -756,6 +865,31 @@ do --- UnitManager
         return result
     end
 
+    ---comment
+    ---@param shooter Unit
+    ---@param target Unit
+    function UnitManager:registerGunKill(shooter, target)
+
+        if self:isUnitAlive(shooter:getName()) == false then
+            return --if hit by a bullet from a dead unit the hit does not count
+        end
+
+        if not self.bullet_hits[target:getName()] then
+            self.bullet_hits[target:getName()] = 0
+        end
+
+        if self:isUnitAlive(target:getName()) == false then
+            return --if a unit is already dead there's no need to do anything
+        end
+
+        self.bullet_hits[target:getName()] = Config.KillParameters.Bullets
+
+        if self.bullet_hits[target:getName()] >= Config.KillParameters.Bullets then
+            self:markUnitDead(target)
+            self._notifier:NotifyGunKillDelayed(shooter, Config.Delays.GunKillDelay)
+        end
+    end
+
     ---Registers a hit
     ---@param target Unit
     ---@param shooter Unit
@@ -804,7 +938,7 @@ do --- UnitManager
             self.crashed_units[unitName] = true
 
             self.invincibilityManager:setMortal(weapon)
-            trigger.action.explosion(weapon:getPoint(), 30)
+            trigger.action.explosion(weapon:getPoint(), 5)
 
         end
     end
@@ -1395,7 +1529,6 @@ do
         self._config = config
 
         self._deletedWeapons = {}
-
         return self
     end
 
@@ -1407,6 +1540,186 @@ do
         
         return nil
     end
+
+    do -- Guns
+
+        local activeShooters = {}
+        
+        ---@type table<string, boolean>
+        local gunKill = {}
+
+        ---@type table<string, number>
+        local gunHits = {}
+        
+        ---@class GunTrackingData
+        ---@field shooter Unit
+        ---@field target Unit
+        ---@field unitManager UnitManager
+        ---@field checkIndex integer
+        ---@field lastVelocity Vec3
+        ---@field lastTime number 
+
+        ---comment
+        ---@param data GunTrackingData
+        ---@param time number
+        local function TrackPossibleHitsTask(data, time)
+
+            local shooter = data.shooter
+            local target = data.target
+
+            if shooter == nil or target == nil then
+                return
+            end
+
+            if shooter:isExist() ~= true or target:isExist() ~= true then
+                return
+            end
+
+            if data.checkIndex > 0 and activeShooters[shooter:getName()] == false then
+                return
+            end
+
+            local shooterV = shooter:getVelocity()
+            local targetV = target:getVelocity()
+
+            if Config and Config.KillParameters and Config.KillParameters.GunKillOnlyRearAspect == true then
+                    
+                local aspect = Helpers.vecAlignment(shooterV, targetV)
+
+                if aspect < 0.1 then
+                    Log.debugOutText("Shot scrapped, only tail aspect shots count", 1)
+                    return
+                end
+            end
+
+            data.checkIndex = data.checkIndex + 1
+
+            local magnitude = Helpers.vectorMagnitude(shooterV)
+            local bulletStartPos = shooter:getPoint()
+
+            ---@param unit Unit
+            local getBulletVelocity = function(unit)
+
+                local unitType = unit:getTypeName()
+                
+                local gunData = {}
+                gunData["MiG-29A"] = 900
+
+                local velocity = 1000
+
+                if gunData[unitType] ~= nil then
+                    velocity = gunData[unitType]
+                end
+
+                Log.debugOutText("using unit type: " .. unitType .. " and vel: " .. velocity, 1)
+
+                return velocity
+            end
+
+            local bulletVelocity = getBulletVelocity(shooter)
+
+            local bulletV = Helpers.vecSetMagnitude(shooterV, magnitude + bulletVelocity)
+            local targetPos = target:getPoint()
+            
+            local currentTime = timer.getTime()
+
+            local multiplier = 1 / (currentTime - data.lastTime)
+
+            local acceleration = {
+                x = (targetV.x - data.lastVelocity.x) * multiplier,
+                y = (targetV.y - data.lastVelocity.y) * multiplier,
+                z = (targetV.z - data.lastVelocity.z) * multiplier
+            }
+
+            data.lastVelocity = targetV
+            data.lastTime = currentTime
+
+            local isHit = Helpers.vecCollision(bulletStartPos, bulletV, targetPos, targetV, acceleration)
+
+            Log.debugOutText("hit: " .. tostring(isHit), 1)
+
+            if isHit == true then
+                if not gunHits[target:getName()] then gunHits[target:getName()] = 0 end
+
+                gunHits[target:getName()] = gunHits[target:getName()] + 1
+
+                if gunHits[target:getName()] > 3 then
+                    data.unitManager:registerGunKill(shooter, target)
+                end
+            end
+
+            return time + 0.2
+        end
+
+        ---comment
+        ---@param shooter Unit
+        function WeaponManager:StartTrackingGun(shooter)
+
+            if self._unitManager:isUnitAlive(shooter:getName()) == false then
+                self._notifier:DenyShot(shooter)
+                return
+            end
+
+            activeShooters[shooter:getName()] = true
+
+            local maxRange = 2000 --meters
+            ---@type VolumePyramid
+            local volumeArea = {
+                id = world.VolumeType.PYRAMID,
+                params = {
+                    pos = shooter:getPosition(),
+                    length = maxRange,
+                    halfAngleHor = math.rad(20),
+                    halfAngleVer = math.rad(20)
+                }
+            }
+
+            ---@type Unit
+            local foundAircraft = nil
+
+            ---@param foundItem Object
+            ---@param originObject Unit
+            local foundObject = function(foundItem, originObject)
+                if
+                    foundAircraft == nil
+                    and foundItem:getCategory() == Object.Category.UNIT
+                    and Unit.getDesc(foundItem).category == Unit.Category.AIRPLANE
+                    and foundItem:getName() ~= originObject:getName()
+                then
+                    foundAircraft = foundItem --[[@as Unit]]
+                end
+            end
+
+            world.searchObjects(Object.Category.UNIT, volumeArea, foundObject, shooter)
+
+            if foundAircraft == nil then return end
+            Log.debugOutText("found target: " .. foundAircraft:getName(), 2)
+
+            local velocity = foundAircraft:getVelocity()
+
+            ---@type GunTrackingData
+            local data = {
+                shooter = shooter,
+                target = foundAircraft,
+                checkIndex = 0,
+                lastVelocity = {
+                    x = velocity.x,
+                    y = velocity.y,
+                    z = velocity.z
+                },
+                lastTime = timer.getTime(),
+                unitManager = self._unitManager
+            }
+
+            timer.scheduleFunction(TrackPossibleHitsTask, data, timer.getTime() + 0.2)
+        end
+
+        function WeaponManager:StopTrackingGun(shooter)
+            activeShooters[shooter:getName()] = false
+        end
+    
+    end
+
 
     function WeaponManager.ExplodeWeapon(weapon)
         local pos = weapon:getPoint()
@@ -1528,7 +1841,7 @@ do
 
         checkInterval = math.abs(checkInterval)
         if checkInterval > 5 then checkInterval = 5 end
-        if data.checkIncrement < 10 then checkInterval = 0.3 end
+        if data.checkIncrement < 10 then checkInterval = 0.2 end
         return time + checkInterval
     end
 
@@ -1665,7 +1978,13 @@ do -- Event Handler
             local shooter = e.initiator
             if self._unitManager:isUnitAlive(shooter:getName()) == false then
                 self._notifier:DenyShot(shooter)
+            else 
+                self._weaponsManager:StartTrackingGun(shooter)
             end
+        elseif id == world.event.S_EVENT_SHOOTING_END then
+            local shooter = e.initiator
+            self._weaponsManager:StopTrackingGun(shooter)
+
         elseif id == world.event.S_EVENT_SHOT then
             local shooter = e.initiator
             local weapon = e.weapon

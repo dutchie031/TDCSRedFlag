@@ -215,14 +215,14 @@ do -- world
         ---@field min Vec3
         ---@field max Vec3
 
-        ---@class Sphere
+        ---@class Sphere : Volume
         ---@field params SphereParams
 
         ---@class SphereParams
         ---@field point Vec3
         ---@field radius number
 
-        ---@class VolumePyramid
+        ---@class VolumePyramid : Volume
         ---@field params VolumePyramidParams
 
         ---@class VolumePyramidParams
