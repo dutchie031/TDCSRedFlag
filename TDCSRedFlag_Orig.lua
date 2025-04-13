@@ -1706,13 +1706,13 @@ do
     end
 end
 
----@class EventHandler
+---@class RedFlagEventHandler : EventHandler
 ---@field private _unitManager UnitManager
 ---@field private _notifier Notifier
 ---@field private _crashManager CrashManager
 ---@field private _weaponsManager WeaponManager
 ---@field private _respawnManager RespawnManager
-local EventHandler = {}
+local RedFlagEventHandler = {}
 do -- Event Handler
 
     ---comment
@@ -1721,10 +1721,10 @@ do -- Event Handler
     ---@param crashManager CrashManager
     ---@param weaponManager WeaponManager
     ---@param respawnManager RespawnManager
-    ---@return EventHandler
-    function EventHandler.New(unitManger, notifier, crashManager, weaponManager, respawnManager)
-        EventHandler.__index = EventHandler
-        local self = setmetatable({}, EventHandler)
+    ---@return RedFlagEventHandler
+    function RedFlagEventHandler.New(unitManger, notifier, crashManager, weaponManager, respawnManager)
+        RedFlagEventHandler.__index = RedFlagEventHandler
+        local self = setmetatable({}, RedFlagEventHandler)
         self._unitManager = unitManger
         self._notifier = notifier
         self._crashManager = crashManager
@@ -1733,7 +1733,7 @@ do -- Event Handler
         return self
     end
 
-    function EventHandler:onEvent(e)
+    function RedFlagEventHandler:onEvent(e)
         local id = e.id
 
         if id == nil or id == 0 then
@@ -1837,7 +1837,7 @@ local respawnManagerConfig = {
 
 local respawnManager = RespawnManager.New(respawnManagerConfig, unitManager)
 
-local eventHandler = EventHandler.New(unitManager, notifier, crashManager, weaponsManager, respawnManager)
+local eventHandler = RedFlagEventHandler.New(unitManager, notifier, crashManager, weaponsManager, respawnManager)
 world.addEventHandler(eventHandler)
 
 Log.info("Version: " .. version)
