@@ -1,4 +1,4 @@
-local version  = "0.2.0"
+local version  = "{{version}}"
 
 --=========================================
 
@@ -1566,6 +1566,10 @@ do
 
             local shooter = data.shooter
             local target = data.target
+
+            if Helpers.isPlayer(shooter:getID(), shooter:getCoalition()) ~= true then
+                return nil
+            end
 
             if shooter == nil or target == nil then
                 return
