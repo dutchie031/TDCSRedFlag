@@ -1,16 +1,34 @@
 
+---@class Logger
+---@field private _prefix string
 local Log = {}
 do
-    Log.info = function(string)
-        env.info("[TDCS Red Flag] " .. (string or "nil"))
+
+    function Log.New(name)
+        Log.__index = Log
+        local self = setmetatable({}, Log)
+
+        self._prefix = "[TDCS Red Flag]"
+        if name then
+            self._prefix = self._prefix .. " [" .. name .. "]"
+        end
+
+        return self
     end
 
-    Log.warn = function(string)
-        env.warn("[TDCS Red Flag] " .. (string or "nil"))
+    function Log:info(string)
+        if not string then return end
+        env.info(self._prefix .. " " .. string)
     end
 
-    Log.error = function(string)
-        env.error("[TDCS Red Flag] " .. (string or "nil"))
+    function Log:error(string)
+        if not string then return end
+        env.error(self._prefix .. " " .. string)
+    end
+
+    function Log:warn(string)
+        if not string then return end
+        env.warning(self._prefix .. " " .. string)
     end
 
     Log.debug = function(string)
@@ -32,3 +50,6 @@ do
         end
     end
 end
+
+if RedFlag == nil then RedFlag = {} end
+RedFlag.Log = Log
